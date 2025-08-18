@@ -18,12 +18,21 @@ export default function ScannerScreen({ onClose, onScanned }) {
   const [mountCamera, setMountCamera] = useState(false);
   const [initializing, setInitializing] = useState(true);
   const [mountError, setMountError] = useState(null);
+  const [forceAlt, setForceAlt] = useState(false);
+  const [timeoutFired, setTimeoutFired] = useState(false);
   const cameraRef = useRef(null);
 
   // Delay mount to avoid crashes on some older devices
   useEffect(() => {
     const t = setTimeout(() => setMountCamera(true), 150);
+    // Si en 2500ms no está lista la cámara, damos opción de fallback
+    const failT = setTimeout(() => {
+      if (initializing) {
+        setTimeoutFired(true);
+      }
+    }, 2500);
     return () => clearTimeout(t);
+    return () => clearTimeout(failT);
   }, []);
 
   if (Platform.OS === 'web') {
@@ -77,13 +86,15 @@ export default function ScannerScreen({ onClose, onScanned }) {
     onScanned && onScanned(String(data || ''));
   }, [scanned, onScanned]);
 
-  if (mountError) {
+  if (mountError || forceAlt) {
     return (
       <View style={styles.center}>
-        <Text style={{ textAlign: 'center', marginBottom: 10 }}>Error iniciando cámara:</Text>
-        <Text style={{ color: 'red', textAlign: 'center', marginBottom: 20 }}>{String(mountError.message || mountError)}</Text>
-        <Button title="Reintentar" onPress={() => { setMountError(null); setMountCamera(false); setTimeout(()=>setMountCamera(true),150); }} />
-        <Text style={{ marginVertical: 12, fontWeight: '600' }}>Modo alternativo</Text>
+        {mountError && <>
+          <Text style={{ textAlign: 'center', marginBottom: 10 }}>Error iniciando cámara:</Text>
+          <Text style={{ color: 'red', textAlign: 'center', marginBottom: 20 }}>{String(mountError.message || mountError)}</Text>
+        </>}
+        {!mountError && <Text style={{ textAlign: 'center', marginBottom: 12 }}>Modo alternativo de escaneo</Text>}
+        {mountError && <Button title="Reintentar cámara" onPress={() => { setMountError(null); setForceAlt(false); setMountCamera(false); setTimeout(()=>setMountCamera(true),150); }} />}
         <View style={{ width: '100%', flex: 1 }}>
           <BarCodeScanner
             onBarCodeScanned={scanned ? undefined : (res) => handleBarCodeScanned({ type: res.type, data: res.data })}
@@ -91,6 +102,7 @@ export default function ScannerScreen({ onClose, onScanned }) {
           />
         </View>
         <Button title="Cerrar" onPress={onClose} />
+        {!mountError && <Button title={scanned ? 'Escanear otro' : 'Reiniciar'} onPress={() => setScanned(false)} />}
       </View>
     );
   }
@@ -128,8 +140,14 @@ export default function ScannerScreen({ onClose, onScanned }) {
         <Text style={styles.text}>
           {initializing ? 'Inicializando cámara...' : (scanned ? 'Código escaneado' : 'Apunta al código de barras')}
         </Text>
+        {timeoutFired && !scanned && initializing && (
+          <Button title="Usar modo alternativo" onPress={() => setForceAlt(true)} />
+        )}
         {scanned && <Button title="Escanear otro" onPress={() => { setScanned(false); }} />}
         <Button title="Cerrar" onPress={onClose} />
+        {!forceAlt && !mountError && (
+          <Button title="Forzar modo alternativo" onPress={() => setForceAlt(true)} />
+        )}
       </View>
     </View>
   );
