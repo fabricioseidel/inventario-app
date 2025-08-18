@@ -3,7 +3,6 @@ import React, { useEffect, useState } from 'react';
 import { View, Text, TextInput, Button, Alert, Modal, StyleSheet } from 'react-native';
 import { Picker } from '@react-native-picker/picker';
 import ScannerScreen from './ScannerScreen';
-import { Camera } from 'expo-camera';
 import { upsertProduct, listCategories, addCategory, getProductByBarcode } from '../db';
 
 export default function ProductForm({ initial, onSaved, onCancel }) {
@@ -82,36 +81,7 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
         value={barcode}
         onChangeText={setBarcode}
       />
-      <Button title="📷 Escanear código" onPress={async () => {
-        setPreparingScan(true);
-        try {
-          const getPerm = Camera.getCameraPermissionsAsync || Camera.getPermissionsAsync;
-          const reqPerm = Camera.requestCameraPermissionsAsync || Camera.requestPermissionsAsync;
-          if (getPerm) {
-            const perm = await getPerm();
-            if (!perm.granted && reqPerm) {
-              const r = await reqPerm();
-              if (!r.granted) {
-                Alert.alert('Permiso requerido', 'No se concedió permiso de cámara.');
-                return;
-              }
-            }
-          } else if (reqPerm) {
-            const r = await reqPerm();
-            if (!r.granted) {
-              Alert.alert('Permiso requerido', 'No se concedió permiso de cámara.');
-              return;
-            }
-          }
-          setScanOpen(true);
-        } catch (e) {
-          console.log('Error solicitando permisos cámara antes de abrir scanner', e);
-          Alert.alert('Error', 'No se pudo preparar la cámara: ' + (e.message || e));
-        } finally {
-          setPreparingScan(false);
-        }
-      }} />
-      {preparingScan && <Text style={{ textAlign: 'center', color: '#555' }}>Preparando cámara...</Text>}
+  <Button title="📷 Escanear código" onPress={() => setScanOpen(true)} />
 
       <Text style={{ fontWeight: '600' }}>Categoría</Text>
       <View style={styles.pickerBox}>
