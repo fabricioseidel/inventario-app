@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { SafeAreaView, View, Text, FlatList, Button, StyleSheet, Alert, Modal } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { initDB, listProducts, deleteProductByBarcode } from './src/db';
+import { Camera } from 'expo-camera';
 import ProductForm from './src/screens/ProductForm';
 import { exportCSVFile, exportJSONFile } from './src/export';
 
@@ -14,6 +15,16 @@ export default function App() {
   useEffect(() => {
     (async () => {
       try {
+        // Pre-solicitamos permiso de cámara (evita algunos crashes en build release al abrir modal)
+        try {
+          const perm = await Camera.getCameraPermissionsAsync();
+          if (!perm.granted) {
+            await Camera.requestCameraPermissionsAsync();
+          }
+        } catch (permErr) {
+          console.log('No se pudo pre-solicitar permiso de cámara:', permErr);
+        }
+
         await initDB();
         await refresh();
         setReady(true);
