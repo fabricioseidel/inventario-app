@@ -1,23 +1,33 @@
 {
   "expo": {
     "name": "Inventario App",
-    "slug": "inventario-app", 
+    "slug": "inventario-app",
     "version": "1.0.0",
+    "runtimeVersion": {
+      "policy": "sdkVersion"
+    },
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "splash": {
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
-    "assetBundlePatterns": ["**/*"],
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "ios": {
       "supportsTablet": true
     },
     "android": {
+      "versionCode": 1,
       "adaptiveIcon": {
         "backgroundColor": "#FFFFFF"
       },
-      "permissions": ["android.permission.CAMERA"]
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO"
+      ],
+      "package": "com.fabriseidel.inventarioapp"
     },
     "plugins": [
       [
@@ -26,6 +36,11 @@
           "cameraPermission": "Esta app necesita acceso a la cámara para escanear códigos de barras."
         }
       ]
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "a1287fed-302d-49e2-988e-c2709525cdbe"
+      }
+    }
   }
 }
