@@ -16,6 +16,7 @@
     "@supabase/supabase-js": "^2.55.0",
     "expo": "~48.0.21",
     "expo-camera": "~13.2.1",
+  "expo-barcode-scanner": "~12.3.2",
     "expo-file-system": "~15.2.2",
     "expo-sharing": "~11.2.2",
     "expo-sqlite": "~11.1.1",

@@ -2,6 +2,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { View, Text, Button, StyleSheet, Platform, ActivityIndicator, Alert } from 'react-native';
 import { Camera, useCameraPermissions } from 'expo-camera';
+import { BarCodeScanner } from 'expo-barcode-scanner';
 
 export default function ScannerScreen({ onClose, onScanned }) {
   let permissionHook = [];
@@ -82,6 +83,13 @@ export default function ScannerScreen({ onClose, onScanned }) {
         <Text style={{ textAlign: 'center', marginBottom: 10 }}>Error iniciando cámara:</Text>
         <Text style={{ color: 'red', textAlign: 'center', marginBottom: 20 }}>{String(mountError.message || mountError)}</Text>
         <Button title="Reintentar" onPress={() => { setMountError(null); setMountCamera(false); setTimeout(()=>setMountCamera(true),150); }} />
+        <Text style={{ marginVertical: 12, fontWeight: '600' }}>Modo alternativo</Text>
+        <View style={{ width: '100%', flex: 1 }}>
+          <BarCodeScanner
+            onBarCodeScanned={scanned ? undefined : (res) => handleBarCodeScanned({ type: res.type, data: res.data })}
+            style={{ flex: 1 }}
+          />
+        </View>
         <Button title="Cerrar" onPress={onClose} />
       </View>
     );
