@@ -1,6 +1,6 @@
 // src/screens/ScannerScreen.js
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { View, Text, Button, StyleSheet, Platform, ActivityIndicator } from 'react-native';
+import { View, Text, Button, StyleSheet, Platform, ActivityIndicator, Alert } from 'react-native';
 import { Camera, useCameraPermissions } from 'expo-camera';
 
 export default function ScannerScreen({ onClose, onScanned }) {
@@ -8,6 +8,7 @@ export default function ScannerScreen({ onClose, onScanned }) {
   const [scanned, setScanned] = useState(false);
   const [mountCamera, setMountCamera] = useState(false);
   const [initializing, setInitializing] = useState(true);
+  const [mountError, setMountError] = useState(null);
   const cameraRef = useRef(null);
 
   // Delay mount to avoid crashes on some older devices
@@ -49,6 +50,17 @@ export default function ScannerScreen({ onClose, onScanned }) {
     onScanned && onScanned(String(data || ''));
   }, [scanned, onScanned]);
 
+  if (mountError) {
+    return (
+      <View style={styles.center}>
+        <Text style={{ textAlign: 'center', marginBottom: 10 }}>Error iniciando cámara:</Text>
+        <Text style={{ color: 'red', textAlign: 'center', marginBottom: 20 }}>{String(mountError.message || mountError)}</Text>
+        <Button title="Reintentar" onPress={() => { setMountError(null); setMountCamera(false); setTimeout(()=>setMountCamera(true),150); }} />
+        <Button title="Cerrar" onPress={onClose} />
+      </View>
+    );
+  }
+
   return (
     <View style={{ flex: 1, backgroundColor: 'black' }}>
       {mountCamera ? (
@@ -56,9 +68,13 @@ export default function ScannerScreen({ onClose, onScanned }) {
           ref={cameraRef}
           style={{ flex: 1 }}
           type={Camera.Constants.Type.back}
-          ratio="16:9"
           onBarCodeScanned={scanned ? undefined : handleBarCodeScanned}
           onCameraReady={() => setInitializing(false)}
+          onMountError={(err) => {
+            console.log('Camera mount error', err);
+            setMountError(err?.nativeErrorMessage || err?.message || 'Fallo desconocido');
+            Alert.alert('Cámara', 'No se pudo inicializar la cámara.');
+          }}
           barCodeScannerSettings={{
             barCodeTypes: [
               Camera.Constants.BarCodeType.qr,

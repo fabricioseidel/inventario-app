@@ -3,6 +3,7 @@ import React, { useEffect, useState } from 'react';
 import { View, Text, TextInput, Button, Alert, Modal, StyleSheet } from 'react-native';
 import { Picker } from '@react-native-picker/picker';
 import ScannerScreen from './ScannerScreen';
+import { Camera } from 'expo-camera';
 import { upsertProduct, listCategories, addCategory, getProductByBarcode } from '../db';
 
 export default function ProductForm({ initial, onSaved, onCancel }) {
@@ -17,6 +18,7 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
   const [catModal, setCatModal] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState('');
   const [scanOpen, setScanOpen] = useState(false);
+  const [preparingScan, setPreparingScan] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -80,7 +82,27 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
         value={barcode}
         onChangeText={setBarcode}
       />
-      <Button title="📷 Escanear código" onPress={() => setScanOpen(true)} />
+      <Button title="📷 Escanear código" onPress={async () => {
+        setPreparingScan(true);
+        try {
+          const perm = await Camera.getCameraPermissionsAsync();
+          if (!perm.granted) {
+            const req = await Camera.requestCameraPermissionsAsync();
+            if (!req.granted) {
+              Alert.alert('Permiso requerido', 'No se concedió permiso de cámara.');
+              setPreparingScan(false);
+              return;
+            }
+          }
+          setScanOpen(true);
+        } catch (e) {
+          console.log('Error solicitando permisos cámara antes de abrir scanner', e);
+          Alert.alert('Error', 'No se pudo preparar la cámara: ' + (e.message || e));
+        } finally {
+          setPreparingScan(false);
+        }
+      }} />
+      {preparingScan && <Text style={{ textAlign: 'center', color: '#555' }}>Preparando cámara...</Text>}
 
       <Text style={{ fontWeight: '600' }}>Categoría</Text>
       <View style={styles.pickerBox}>
@@ -131,7 +153,7 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
       <Button title="❌ Cancelar" onPress={onCancel} color="#b00020" />
 
       {/* Scanner modal */}
-      <Modal visible={scanOpen} animationType="slide" onRequestClose={() => setScanOpen(false)}>
+  <Modal visible={scanOpen} animationType="slide" onRequestClose={() => setScanOpen(false)}>
         <ScannerScreen
           onClose={() => setScanOpen(false)}
           onScanned={(code) => { setBarcode(code); setScanOpen(false); }}
