@@ -4,7 +4,15 @@ import { View, Text, Button, StyleSheet, Platform, ActivityIndicator, Alert } fr
 import { Camera, useCameraPermissions } from 'expo-camera';
 
 export default function ScannerScreen({ onClose, onScanned }) {
-  const [permission, requestPermission] = useCameraPermissions();
+  let permissionHook = [];
+  try {
+    permissionHook = useCameraPermissions ? useCameraPermissions() : [];
+  } catch (e) {
+    // Si falla el hook, seguimos con fallback dinámico más abajo
+    console.log('Fallo useCameraPermissions hook', e);
+  }
+  const [permission, requestPermission] = permissionHook;
+  const [manualPermChecked, setManualPermChecked] = useState(false);
   const [scanned, setScanned] = useState(false);
   const [mountCamera, setMountCamera] = useState(false);
   const [initializing, setInitializing] = useState(true);
@@ -26,7 +34,25 @@ export default function ScannerScreen({ onClose, onScanned }) {
     );
   }
 
-  if (!permission) {
+  // Fallback manual si hook no disponible o sin permiso cargado
+  useEffect(() => {
+    (async () => {
+      if (!permission && Camera?.getCameraPermissionsAsync && !manualPermChecked) {
+        try {
+          const perm = await Camera.getCameraPermissionsAsync();
+          if (!perm.granted && Camera?.requestCameraPermissionsAsync) {
+            await Camera.requestCameraPermissionsAsync();
+          }
+        } catch (e) {
+          console.log('Fallback permisos cámara error', e);
+        } finally {
+          setManualPermChecked(true);
+        }
+      }
+    })();
+  }, [permission, manualPermChecked]);
+
+  if (!permission && !manualPermChecked) {
     return (
       <View style={styles.center}>
         <Text>Comprobando permisos...</Text>
@@ -34,7 +60,7 @@ export default function ScannerScreen({ onClose, onScanned }) {
     );
   }
 
-  if (!permission.granted) {
+  if (permission && !permission.granted) {
     return (
       <View style={styles.center}>
         <Text>Se requiere permiso de cámara</Text>

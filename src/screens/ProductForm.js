@@ -3,7 +3,6 @@ import React, { useEffect, useState } from 'react';
 import { View, Text, TextInput, Button, Alert, Modal, StyleSheet } from 'react-native';
 import { Picker } from '@react-native-picker/picker';
 import ScannerScreen from './ScannerScreen';
-import { Camera } from 'expo-camera';
 import { upsertProduct, listCategories, addCategory, getProductByBarcode } from '../db';
 
 export default function ProductForm({ initial, onSaved, onCancel }) {
@@ -82,25 +81,9 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
         value={barcode}
         onChangeText={setBarcode}
       />
-      <Button title="📷 Escanear código" onPress={async () => {
-        setPreparingScan(true);
-        try {
-          const perm = await Camera.getCameraPermissionsAsync();
-          if (!perm.granted) {
-            const req = await Camera.requestCameraPermissionsAsync();
-            if (!req.granted) {
-              Alert.alert('Permiso requerido', 'No se concedió permiso de cámara.');
-              setPreparingScan(false);
-              return;
-            }
-          }
-          setScanOpen(true);
-        } catch (e) {
-          console.log('Error solicitando permisos cámara antes de abrir scanner', e);
-          Alert.alert('Error', 'No se pudo preparar la cámara: ' + (e.message || e));
-        } finally {
-          setPreparingScan(false);
-        }
+      <Button title="📷 Escanear código" onPress={() => {
+        // Delegamos la solicitud de permisos al propio ScannerScreen con su hook
+        setScanOpen(true);
       }} />
       {preparingScan && <Text style={{ textAlign: 'center', color: '#555' }}>Preparando cámara...</Text>}
 

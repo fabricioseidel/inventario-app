@@ -15,14 +15,18 @@ export default function App() {
   useEffect(() => {
     (async () => {
       try {
-        // Pre-solicitamos permiso de cámara (evita algunos crashes en build release al abrir modal)
+        // Pre-solicitamos permiso de cámara si las funciones existen en esta versión
         try {
-          const perm = await Camera.getCameraPermissionsAsync();
-          if (!perm.granted) {
-            await Camera.requestCameraPermissionsAsync();
+          if (Camera?.getCameraPermissionsAsync && Camera?.requestCameraPermissionsAsync) {
+            const perm = await Camera.getCameraPermissionsAsync();
+            if (!perm.granted) {
+              await Camera.requestCameraPermissionsAsync();
+            }
+          } else {
+            console.log('API de permisos de cámara no disponible, se delega al componente Scanner.');
           }
         } catch (permErr) {
-          console.log('No se pudo pre-solicitar permiso de cámara:', permErr);
+          console.log('No se pudo pre-solicitar permiso de cámara:', permErr?.message || permErr);
         }
 
         await initDB();
