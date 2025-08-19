@@ -2,6 +2,8 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { View, Text, Button, StyleSheet, Platform, ActivityIndicator } from 'react-native';
 import { BarCodeScanner } from 'expo-barcode-scanner';
+import { logError } from '../errorLogger';
+import * as Haptics from 'expo-haptics';
 
 export default function ScannerScreen({ onClose, onScanned }) {
   const [hasPermission, setHasPermission] = useState(null);
@@ -14,7 +16,7 @@ export default function ScannerScreen({ onClose, onScanned }) {
         const { status } = await BarCodeScanner.requestPermissionsAsync();
         setHasPermission(status === 'granted');
       } catch (e) {
-        console.log('Permiso cámara error', e);
+        logError('scanner_permission', e);
         setHasPermission(false);
       } finally {
         setLoading(false);
@@ -22,9 +24,13 @@ export default function ScannerScreen({ onClose, onScanned }) {
     })();
   }, []);
 
-  const handleBarCodeScanned = useCallback(({ data }) => {
+  const handleBarCodeScanned = useCallback(async ({ data, type }) => {
     if (scanned) return;
     setScanned(true);
+    try {
+      // Feedback háptico suave
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch {}
     onScanned && onScanned(String(data || ''));
   }, [scanned, onScanned]);
 
@@ -39,6 +45,8 @@ export default function ScannerScreen({ onClose, onScanned }) {
       <BarCodeScanner
         style={{ flex:1 }}
         onBarCodeScanned={scanned ? undefined : handleBarCodeScanned}
+        // Puedes limitar tipos si deseas mayor precisión:
+        // barCodeTypes={[BarCodeScanner.Constants.BarCodeType.ean13, BarCodeScanner.Constants.BarCodeType.ean8, BarCodeScanner.Constants.BarCodeType.code128]}
       />
       <View style={styles.overlay}>
         <Text style={styles.text}>{scanned ? 'Código escaneado' : 'Escanea un código'}</Text>

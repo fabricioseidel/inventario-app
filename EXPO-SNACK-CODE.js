@@ -1,6 +1,4 @@
-
-
-  import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View, Text, TextInput, Button, FlatList, Alert,
   StyleSheet, SafeAreaView, Dimensions, Platform, Modal

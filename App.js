@@ -2,6 +2,7 @@
 import React, { useEffect, useState } from 'react';
 import { SafeAreaView, View, Text, FlatList, Button, StyleSheet, Alert, Modal } from 'react-native';
 import { initDB, listProducts, deleteProductByBarcode } from './src/db';
+import { useErrorLogs, clearErrors, logError, installGlobalErrorCapture } from './src/errorLogger';
 import ProductForm from './src/screens/ProductForm';
 import { exportCSVFile, exportJSONFile } from './src/export';
 
@@ -10,22 +11,37 @@ export default function App() {
   const [products, setProducts] = useState([]);
   const [editing, setEditing] = useState(null); // producto para editar o null
   const [openForm, setOpenForm] = useState(false);
+  const [errorPanel, setErrorPanel] = useState(false);
+  const errors = useErrorLogs();
 
   useEffect(() => {
+    installGlobalErrorCapture();
     (async () => {
       try {
-        await initDB();
-        await refresh();
+        try {
+          await initDB();
+        } catch (e) {
+          logError('db_init', e);
+          Alert.alert('DB', 'Error inicializando la base de datos');
+        }
+        try {
+          await refresh();
+        } catch (e) {
+          logError('products_load', e);
+        }
         setReady(true);
-      } catch (e) {
-        Alert.alert('DB', 'Error inicializando la base de datos');
-      }
+      } catch (e) { logError('app_boot', e); Alert.alert('Error', 'Fallo general al iniciar'); }
     })();
   }, []);
 
   const refresh = async () => {
-    const rows = await listProducts();
-    setProducts(rows);
+    try {
+      const rows = await listProducts();
+      setProducts(rows);
+    } catch (e) {
+      logError('products_refresh', e);
+      Alert.alert('Error', 'No se pudo cargar el listado');
+    }
   };
 
   const onCreate = () => { setEditing(null); setOpenForm(true); };
@@ -47,8 +63,10 @@ export default function App() {
     Alert.alert('Confirmar', `¿Eliminar producto ${item.barcode}?`, [
       { text: 'Cancelar', style: 'cancel' },
       { text: 'Eliminar', style: 'destructive', onPress: async () => {
-          await deleteProductByBarcode(item.barcode);
-          await refresh();
+          try {
+            await deleteProductByBarcode(item.barcode);
+            await refresh();
+          } catch (e) { logError('product_delete', e); Alert.alert('Error', 'No se pudo eliminar'); }
         }
       }
     ]);
@@ -77,6 +95,8 @@ export default function App() {
         <Button title="📊 Exportar CSV" onPress={exportCSVFile} />
         <View style={{ height: 8 }} />
         <Button title="🧰 Exportar JSON" onPress={exportJSONFile} />
+        <View style={{ height: 8 }} />
+        <Button title={`⚠️ Errores (${errors.length})`} color={errors.length ? '#c0392b' : '#666'} onPress={() => setErrorPanel(true)} />
       </View>
 
       <Text style={styles.subtitle}>Productos ({products.length})</Text>
@@ -104,6 +124,29 @@ export default function App() {
             onSaved={onSaved}
             onCancel={() => setOpenForm(false)}
           />
+        </SafeAreaView>
+      </Modal>
+      <Modal visible={errorPanel} animationType="fade" onRequestClose={() => setErrorPanel(false)}>
+        <SafeAreaView style={{ flex:1, backgroundColor:'#111' }}>
+          <View style={{ flexDirection:'row', justifyContent:'space-between', padding:12 }}>
+            <Text style={{ color:'#fff', fontWeight:'700', fontSize:16 }}>Errores ({errors.length})</Text>
+            <Button title="Cerrar" onPress={() => setErrorPanel(false)} />
+          </View>
+          <FlatList
+            data={errors}
+            keyExtractor={i=>i.id}
+            style={{ flex:1, paddingHorizontal:12 }}
+            renderItem={({ item }) => (
+              <View style={{ backgroundColor:'#222', padding:10, borderRadius:8, marginBottom:10 }}>
+                <Text style={{ color:'#0af', fontWeight:'600' }}>{item.ts} · {item.context}</Text>
+                <Text style={{ color:'#fff' }}>{item.message}</Text>
+                {!!item.stack && <Text style={{ color:'#888', fontSize:10, marginTop:4 }}>{item.stack.split('\n')[0]}</Text>}
+              </View>
+            )}
+          />
+          <View style={{ padding:12 }}>
+            {errors.length > 0 && <Button title="Limpiar errores" color="#e67e22" onPress={() => clearErrors()} />}
+          </View>
         </SafeAreaView>
       </Modal>
     </SafeAreaView>

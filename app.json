@@ -18,25 +18,18 @@
     "ios": {
       "supportsTablet": true
     },
-    "android": {
+  "android": {
       "versionCode": 1,
       "adaptiveIcon": {
         "backgroundColor": "#FFFFFF"
       },
       "permissions": [
-        "android.permission.CAMERA",
-        "android.permission.RECORD_AUDIO"
+        "android.permission.CAMERA"
       ],
       "package": "com.fabriseidel.inventarioapp"
     },
-    "plugins": [
-      [
-        "expo-camera",
-        {
-          "cameraPermission": "Esta app necesita acceso a la cámara para escanear códigos de barras."
-        }
-      ]
-    ],
+  "plugins": [],
+  "updates": { "enabled": false },
     "extra": {
       "eas": {
         "projectId": "a1287fed-302d-49e2-988e-c2709525cdbe"

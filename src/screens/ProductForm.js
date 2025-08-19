@@ -4,6 +4,7 @@ import { View, Text, TextInput, Button, Alert, Modal, StyleSheet } from 'react-n
 import { Picker } from '@react-native-picker/picker';
 import ScannerScreen from './ScannerScreen';
 import { upsertProduct, listCategories, addCategory, getProductByBarcode } from '../db';
+import { logError } from '../errorLogger';
 
 export default function ProductForm({ initial, onSaved, onCancel }) {
   const [barcode, setBarcode] = useState(initial?.barcode || '');
@@ -21,22 +22,45 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
 
   useEffect(() => {
     (async () => {
-      const rows = await listCategories();
-      setCategories(rows);
+      try {
+        const rows = await listCategories();
+        setCategories(rows);
+      } catch (e) {
+        logError('categories_load', e);
+        Alert.alert('Error', 'No se pudieron cargar categorías');
+      }
     })();
   }, []);
 
   const handleAddCategory = async () => {
-    const name = (newCategoryName || '').trim();
-    if (!name) return Alert.alert('Atención', 'Escribe un nombre de categoría');
-    const exists = categories.some(c => c.name.toLowerCase() === name.toLowerCase());
-    if (exists) return Alert.alert('Ya existe', 'Esa categoría ya está creada');
-    await addCategory(name);
-    const rows = await listCategories();
-    setCategories(rows);
-    setCategory(name);
-    setNewCategoryName('');
-    setCatModal(false);
+    const raw = newCategoryName || '';
+    const name = raw.trim();
+    if (!name) {
+      Alert.alert('Atención', 'Escribe un nombre de categoría');
+      return;
+    }
+    try {
+      const exists = categories.some(c => (c.name || '').toLowerCase() === name.toLowerCase());
+      if (exists) {
+        Alert.alert('Ya existe', 'Esa categoría ya está creada');
+        return;
+      }
+      const row = await addCategory(name);
+      if (!row) {
+        logError('category_add_empty', new Error('Insert retornó vacío'));
+        Alert.alert('Error', 'No se pudo crear (retorno vacío)');
+        return;
+      }
+      const updated = await listCategories();
+      setCategories(updated);
+      setCategory(name);
+      setNewCategoryName('');
+      setCatModal(false);
+      Alert.alert('OK', 'Categoría creada');
+    } catch (e) {
+      logError('category_add', e, { name });
+      Alert.alert('Error', 'No se pudo crear la categoría');
+    }
   };
 
   const save = async () => {
@@ -67,8 +91,13 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
       }
     }
 
-    const saved = await upsertProduct(payload);
-    onSaved && onSaved(saved);
+    try {
+      const saved = await upsertProduct(payload);
+      onSaved && onSaved(saved);
+    } catch (e) {
+      logError('product_save', e);
+      Alert.alert('Error', 'No se pudo guardar el producto');
+    }
   };
 
   return (
@@ -92,13 +121,14 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
             else setCategory(val);
           }}
         >
-          <Picker.Item label="Selecciona una categoría" value="" />
+      <Picker.Item label="Selecciona una categoría" value="" />
           {categories.map(c => (
             <Picker.Item key={c.id} label={c.name} value={c.name} />
           ))}
           <Picker.Item label="➕ Nueva categoría…" value="__new__" />
         </Picker>
       </View>
+    {!categories.length && <Text style={{color:'#b00', fontSize:12}}>No hay categorías cargadas</Text>}
 
       <TextInput
         style={styles.input}
@@ -128,7 +158,7 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
         keyboardType="numeric"
       />
 
-      <Button title={initial ? '✅ Actualizar' : '➕ Guardar'} onPress={save} />
+  <Button title={initial ? '✅ Actualizar' : '➕ Guardar'} onPress={save} />
       <Button title="❌ Cancelar" onPress={onCancel} color="#b00020" />
 
       {/* Scanner modal */}
