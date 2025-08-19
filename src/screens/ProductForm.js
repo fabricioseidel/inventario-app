@@ -1,12 +1,17 @@
 // src/screens/ProductForm.js
 import React, { useEffect, useState } from 'react';
-import { View, Text, TextInput, Button, Alert, Modal, StyleSheet } from 'react-native';
-import { Picker } from '@react-native-picker/picker';
+import {
+  View, Text, TextInput, Button, Alert, Modal, StyleSheet,
+  TouchableOpacity, FlatList, ActivityIndicator, Platform
+} from 'react-native';
 import ScannerScreen from './ScannerScreen';
 import { upsertProduct, listCategories, addCategory, getProductByBarcode } from '../db';
-import { logError } from '../errorLogger';
+import { pushProductRemoteSafe } from '../sync';
+// Si tienes un logger de errores en tu proyecto, descomenta:
+// import { logError } from '../errorLogger';
 
 export default function ProductForm({ initial, onSaved, onCancel }) {
+  // -------- formulario --------
   const [barcode, setBarcode] = useState(initial?.barcode || '');
   const [category, setCategory] = useState(initial?.category || '');
   const [purchasePrice, setPurchasePrice] = useState(String(initial?.purchasePrice ?? ''));
@@ -14,11 +19,17 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
   const [expiryDate, setExpiryDate] = useState(initial?.expiryDate || '');
   const [stock, setStock] = useState(String(initial?.stock ?? ''));
 
+  // -------- categorías --------
   const [categories, setCategories] = useState([]);
-  const [catModal, setCatModal] = useState(false);
+  const [catSelectOpen, setCatSelectOpen] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState('');
+  const [creatingCategory, setCreatingCategory] = useState(false);
+
+  // -------- scanner --------
   const [scanOpen, setScanOpen] = useState(false);
-  const [preparingScan, setPreparingScan] = useState(false);
+
+  // -------- ui state --------
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -26,43 +37,13 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
         const rows = await listCategories();
         setCategories(rows);
       } catch (e) {
-        logError('categories_load', e);
+        // logError?.('categories_load', e);
         Alert.alert('Error', 'No se pudieron cargar categorías');
       }
     })();
   }, []);
 
-  const handleAddCategory = async () => {
-    const raw = newCategoryName || '';
-    const name = raw.trim();
-    if (!name) {
-      Alert.alert('Atención', 'Escribe un nombre de categoría');
-      return;
-    }
-    try {
-      const exists = categories.some(c => (c.name || '').toLowerCase() === name.toLowerCase());
-      if (exists) {
-        Alert.alert('Ya existe', 'Esa categoría ya está creada');
-        return;
-      }
-      const row = await addCategory(name);
-      if (!row) {
-        logError('category_add_empty', new Error('Insert retornó vacío'));
-        Alert.alert('Error', 'No se pudo crear (retorno vacío)');
-        return;
-      }
-      const updated = await listCategories();
-      setCategories(updated);
-      setCategory(name);
-      setNewCategoryName('');
-      setCatModal(false);
-      Alert.alert('OK', 'Categoría creada');
-    } catch (e) {
-      logError('category_add', e, { name });
-      Alert.alert('Error', 'No se pudo crear la categoría');
-    }
-  };
-
+  // ------------------- guardar producto -------------------
   const save = async () => {
     if (!barcode) return Alert.alert('Error', 'El código de barras es obligatorio');
     if (!category) return Alert.alert('Error', 'La categoría es obligatoria');
@@ -76,29 +57,132 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
       stock: stock !== '' ? String(stock).trim() : '0',
     };
 
-    // Evitar duplicados mostrando edición existente
+    // Evitar duplicados si estamos creando
     if (!initial) {
-      const exists = await getProductByBarcode(payload.barcode);
-      if (exists) {
-        Alert.alert('Duplicado', 'Ese código ya existe, se cargará para edición');
-        // Rellenamos
-        setCategory(exists.category || '');
-        setPurchasePrice(String(exists.purchase_price ?? ''));
-        setSalePrice(String(exists.sale_price ?? ''));
-        setExpiryDate(exists.expiry_date || '');
-        setStock(String(exists.stock ?? ''));
-        return;
-      }
+      try {
+        const exists = await getProductByBarcode(payload.barcode);
+        if (exists) {
+          Alert.alert('Duplicado', 'Ese código ya existe, se cargará para edición');
+          setCategory(exists.category || '');
+          setPurchasePrice(String(exists.purchase_price ?? ''));
+          setSalePrice(String(exists.sale_price ?? ''));
+          setExpiryDate(exists.expiry_date || '');
+          setStock(String(exists.stock ?? ''));
+          return;
+        }
+      } catch (e) {/* noop */}
     }
 
     try {
-      const saved = await upsertProduct(payload);
-      onSaved && onSaved(saved);
+      setSaving(true);
+      await upsertProduct(payload);         // guarda local (SQLite)
+      await pushProductRemoteSafe(payload); // sube a Supabase (o encola offline)
+      onSaved && onSaved();
     } catch (e) {
-      logError('product_save', e);
+      // logError?.('product_save', e);
       Alert.alert('Error', 'No se pudo guardar el producto');
+    } finally {
+      setSaving(false);
     }
   };
+
+  // ------------------- crear categoría -------------------
+  const createCategory = async () => {
+    const raw = newCategoryName || '';
+    const name = raw.trim();
+    if (!name) {
+      Alert.alert('Atención', 'Escribe un nombre de categoría');
+      return;
+    }
+    try {
+      setCreatingCategory(true);
+      const exists = categories.some(c => (c.name || '').toLowerCase() === name.toLowerCase());
+      if (exists) {
+        Alert.alert('Ya existe', 'Esa categoría ya está creada');
+        setCreatingCategory(false);
+        return;
+      }
+      await addCategory(name);
+      const rows = await listCategories();
+      setCategories(rows);
+      setCategory(name);
+      setNewCategoryName('');
+    } catch (e) {
+      // logError?.('category_add', e);
+      Alert.alert('Error', 'No se pudo crear la categoría');
+    } finally {
+      setCreatingCategory(false);
+    }
+  };
+
+  // ------------------- UI: render categoría actual -------------------
+  const CategoryField = () => (
+    <View style={{ marginBottom: 10 }}>
+      <Text style={{ fontWeight: '600', marginBottom: 6 }}>Categoría</Text>
+      <TouchableOpacity
+        onPress={() => setCatSelectOpen(true)}
+        activeOpacity={0.8}
+        style={styles.selectButton}
+      >
+        <Text style={{ color: category ? '#111' : '#888' }}>
+          {category || 'Selecciona una categoría'}
+        </Text>
+      </TouchableOpacity>
+    </View>
+  );
+
+  // ------------------- UI: modal de selección de categoría -------------------
+  const CategorySelectModal = () => (
+    <Modal
+      visible={catSelectOpen}
+      transparent
+      animationType="fade"
+      onRequestClose={() => setCatSelectOpen(false)}
+      statusBarTranslucent
+    >
+      <View style={styles.modalBackdrop}>
+        <View style={styles.modalCard}>
+          <Text style={{ fontSize: 18, fontWeight: '700', marginBottom: 8 }}>Seleccionar categoría</Text>
+
+          <FlatList
+            data={categories}
+            keyExtractor={(item) => String(item.id)}
+            style={{ maxHeight: 260, marginBottom: 10 }}
+            ItemSeparatorComponent={() => <View style={{ height: 8 }} />}
+            renderItem={({ item }) => (
+              <TouchableOpacity
+                style={styles.catItem}
+                onPress={() => { setCategory(item.name); setCatSelectOpen(false); }}
+              >
+                <Text>{item.name}</Text>
+              </TouchableOpacity>
+            )}
+            ListEmptyComponent={<Text style={{ color: '#666' }}>Sin categorías</Text>}
+          />
+
+          <View style={{ height: 8 }} />
+
+          <Text style={{ fontWeight: '600', marginBottom: 6 }}>➕ Nueva categoría</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="Ej: Snacks"
+            value={newCategoryName}
+            onChangeText={setNewCategoryName}
+          />
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 6 }}>
+            <Button title="Cerrar" onPress={() => setCatSelectOpen(false)} />
+            {creatingCategory ? (
+              <View style={{ paddingHorizontal: 16, justifyContent: 'center' }}>
+                <ActivityIndicator />
+              </View>
+            ) : (
+              <Button title="Crear" onPress={createCategory} />
+            )}
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
 
   return (
     <View style={{ padding: 12, gap: 8 }}>
@@ -110,39 +194,23 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
         value={barcode}
         onChangeText={setBarcode}
       />
-  <Button title="📷 Escanear código" onPress={() => setScanOpen(true)} />
+      <Button title="📷 Escanear código" onPress={() => setScanOpen(true)} />
 
-      <Text style={{ fontWeight: '600' }}>Categoría</Text>
-      <View style={styles.pickerBox}>
-        <Picker
-          selectedValue={category || ''}
-          onValueChange={(val) => {
-            if (val === '__new__') setCatModal(true);
-            else setCategory(val);
-          }}
-        >
-      <Picker.Item label="Selecciona una categoría" value="" />
-          {categories.map(c => (
-            <Picker.Item key={c.id} label={c.name} value={c.name} />
-          ))}
-          <Picker.Item label="➕ Nueva categoría…" value="__new__" />
-        </Picker>
-      </View>
-    {!categories.length && <Text style={{color:'#b00', fontSize:12}}>No hay categorías cargadas</Text>}
+      <CategoryField />
 
       <TextInput
         style={styles.input}
         placeholder="Precio de compra"
         value={purchasePrice}
         onChangeText={setPurchasePrice}
-        keyboardType="numeric"
+        keyboardType={Platform.OS === 'android' ? 'numeric' : 'decimal-pad'}
       />
       <TextInput
         style={styles.input}
         placeholder="Precio de venta"
         value={salePrice}
         onChangeText={setSalePrice}
-        keyboardType="numeric"
+        keyboardType={Platform.OS === 'android' ? 'numeric' : 'decimal-pad'}
       />
       <TextInput
         style={styles.input}
@@ -158,34 +226,22 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
         keyboardType="numeric"
       />
 
-  <Button title={initial ? '✅ Actualizar' : '➕ Guardar'} onPress={save} />
+      {saving ? (
+        <ActivityIndicator />
+      ) : (
+        <Button title={initial ? '✅ Actualizar' : '➕ Guardar'} onPress={save} />
+      )}
       <Button title="❌ Cancelar" onPress={onCancel} color="#b00020" />
 
+      {/* Modal selección de categoría */}
+      <CategorySelectModal />
+
       {/* Scanner modal */}
-  <Modal visible={scanOpen} animationType="slide" onRequestClose={() => setScanOpen(false)}>
+      <Modal visible={scanOpen} animationType="slide" onRequestClose={() => setScanOpen(false)}>
         <ScannerScreen
           onClose={() => setScanOpen(false)}
           onScanned={(code) => { setBarcode(code); setScanOpen(false); }}
         />
-      </Modal>
-
-      {/* Nueva categoría */}
-      <Modal visible={catModal} transparent animationType="fade" onRequestClose={() => setCatModal(false)}>
-        <View style={styles.modalBackdrop}>
-          <View style={styles.modalCard}>
-            <Text style={{ fontSize: 18, fontWeight: '700', marginBottom: 10 }}>Nueva categoría</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="Ej: Snacks"
-              value={newCategoryName}
-              onChangeText={setNewCategoryName}
-            />
-            <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 8 }}>
-              <Button title="Cancelar" onPress={() => setCatModal(false)} />
-              <Button title="Crear" onPress={handleAddCategory} />
-            </View>
-          </View>
-        </View>
       </Modal>
     </View>
   );
@@ -193,8 +249,22 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
 
 const styles = StyleSheet.create({
   title: { fontSize: 18, fontWeight: '700', marginBottom: 6 },
-  input: { borderWidth: 1, borderColor: '#ddd', borderRadius: 6, padding: 10, marginBottom: 8, backgroundColor: '#fff' },
-  pickerBox: { borderWidth: 1, borderColor: '#ddd', borderRadius: 6, marginBottom: 10, overflow: 'hidden' },
-  modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center', padding: 20 },
-  modalCard: { backgroundColor: '#fff', borderRadius: 12, padding: 16, width: '100%' },
+  input: {
+    borderWidth: 1, borderColor: '#ddd', borderRadius: 6,
+    padding: 10, marginBottom: 8, backgroundColor: '#fff'
+  },
+  selectButton: {
+    borderWidth: 1, borderColor: '#ddd', borderRadius: 6,
+    padding: 12, backgroundColor: '#fff'
+  },
+  modalBackdrop: {
+    flex: 1, backgroundColor: 'rgba(0,0,0,0.4)',
+    justifyContent: 'center', alignItems: 'center', padding: 20
+  },
+  modalCard: {
+    backgroundColor: '#fff', borderRadius: 12, padding: 16, width: '100%'
+  },
+  catItem: {
+    padding: 12, borderRadius: 8, backgroundColor: '#f5f5f5'
+  },
 });
