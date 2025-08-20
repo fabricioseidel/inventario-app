@@ -37,6 +37,7 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
         const rows = await listCategories();
         setCategories(rows);
       } catch (e) {
+        console.error('Error al cargar categorías:', e);
         // logError?.('categories_load', e);
         Alert.alert('Error', 'No se pudieron cargar categorías');
       }
@@ -79,6 +80,7 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
       await pushProductRemoteSafe(payload); // sube a Supabase (o encola offline)
       onSaved && onSaved();
     } catch (e) {
+      console.error('Error al guardar producto:', e);
       // logError?.('product_save', e);
       Alert.alert('Error', 'No se pudo guardar el producto');
     } finally {
@@ -102,14 +104,28 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
         setCreatingCategory(false);
         return;
       }
-      await addCategory(name);
+      
+      // Agrega un timeout como medida de seguridad
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Timeout al crear categoría')), 10000)
+      );
+      
+      // Usa Promise.race para evitar bloqueos indefinidos
+      await Promise.race([
+        addCategory(name),
+        timeoutPromise
+      ]);
+      
       const rows = await listCategories();
       setCategories(rows);
       setCategory(name);
       setNewCategoryName('');
+      // Cierra el modal automáticamente si todo sale bien
+      setCatSelectOpen(false);
     } catch (e) {
+      console.error('Error al crear categoría:', e);
       // logError?.('category_add', e);
-      Alert.alert('Error', 'No se pudo crear la categoría');
+      Alert.alert('Error', 'No se pudo crear la categoría: ' + (e.message || 'Error desconocido'));
     } finally {
       setCreatingCategory(false);
     }
