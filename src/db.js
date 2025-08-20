@@ -170,10 +170,52 @@ export function listCategories() {
 
 export function addCategory(name) {
   return new Promise((resolve, reject) => {
-    db.transaction(async (tx) => {
-      await run(tx, `INSERT OR IGNORE INTO categories(name) VALUES (?);`, [name]);
-      const res = await run(tx, `SELECT * FROM categories WHERE name = ?;`, [name]);
-      resolve(res.rows.item(0));
-    }, reject);
+    // Agrega un timeout para evitar bloqueos indefinidos
+    const timeout = setTimeout(() => {
+      reject(new Error('Timeout al crear categoría'));
+    }, 5000); // 5 segundos de timeout
+    
+    try {
+      db.transaction(tx => {
+        tx.executeSql(
+          `INSERT OR IGNORE INTO categories(name) VALUES (?);`,
+          [name],
+          (_, resultInsert) => {
+            tx.executeSql(
+              `SELECT * FROM categories WHERE name = ?;`,
+              [name],
+              (_, resultSelect) => {
+                clearTimeout(timeout);
+                if (resultSelect.rows.length > 0) {
+                  resolve(resultSelect.rows.item(0));
+                } else {
+                  resolve({ id: 0, name: name }); // Fallback por si no se encuentra
+                }
+              },
+              (_, selectError) => {
+                clearTimeout(timeout);
+                reject(selectError);
+                return false;
+              }
+            );
+          },
+          (_, insertError) => {
+            clearTimeout(timeout);
+            reject(insertError);
+            return false;
+          }
+        );
+      }, 
+      txError => {
+        clearTimeout(timeout);
+        reject(txError);
+      },
+      () => {
+        // Transacción completada con éxito
+      });
+    } catch (e) {
+      clearTimeout(timeout);
+      reject(e);
+    }
   });
 }
