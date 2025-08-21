@@ -5,7 +5,7 @@ import {
   TouchableOpacity, FlatList, ActivityIndicator, Platform
 } from 'react-native';
 import ScannerScreen from './ScannerScreen';
-import { upsertProduct, listCategories, addCategory, getProductByBarcode } from '../db';
+import { upsertProduct, listCategories, addCategory, getProductByBarcode, initDB } from '../db';
 import { pushProductRemoteSafe } from '../sync';
 // Si tienes un logger de errores en tu proyecto, descomenta:
 // import { logError } from '../errorLogger';
@@ -34,12 +34,19 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
   useEffect(() => {
     (async () => {
       try {
+        // Asegurarse de que la BD esté inicializada antes de intentar cargar categorías
+        try {
+          await initDB(); // Intentar inicializar la BD aquí también, como respaldo
+        } catch (e) {
+          console.warn("Advertencia: No se pudo reinicializar la BD en el formulario", e);
+        }
+        
         const rows = await listCategories();
         setCategories(rows);
       } catch (e) {
         console.error('Error al cargar categorías:', e);
         // logError?.('categories_load', e);
-        Alert.alert('Error', 'No se pudieron cargar categorías');
+        Alert.alert('Error', 'No se pudieron cargar categorías. Intenta cerrar y abrir la app nuevamente.');
       }
     })();
   }, []);
@@ -103,6 +110,13 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
         Alert.alert('Ya existe', 'Esa categoría ya está creada');
         setCreatingCategory(false);
         return;
+      }
+      
+      // Asegurarse de que la BD esté inicializada antes de intentar crear una categoría
+      try {
+        await initDB(); // Intenta inicializar la BD antes de crear la categoría
+      } catch (e) {
+        console.warn("Advertencia: Falló al inicializar BD antes de crear categoría", e);
       }
       
       // Agrega un timeout como medida de seguridad
