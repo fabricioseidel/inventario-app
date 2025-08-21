@@ -21,38 +21,65 @@ const run = (tx, sql, args = []) =>
 
 export function initDB() {
   return new Promise((resolve, reject) => {
-    db.transaction(async (tx) => {
-      // Tabla principal de productos
-      await run(tx, `
-        CREATE TABLE IF NOT EXISTS products (
-          id INTEGER PRIMARY KEY NOT NULL,
-          barcode TEXT UNIQUE NOT NULL,
-          category TEXT,
-          purchase_price REAL DEFAULT 0,
-          sale_price REAL DEFAULT 0,
-          expiry_date TEXT,
-          stock INTEGER DEFAULT 0,
-          updated_at INTEGER
+    db.transaction(
+      (tx) => {
+        // Crear tabla de productos
+        tx.executeSql(
+          `CREATE TABLE IF NOT EXISTS products (
+             id INTEGER PRIMARY KEY NOT NULL,
+             barcode TEXT UNIQUE NOT NULL,
+             category TEXT,
+             purchase_price REAL DEFAULT 0,
+             sale_price REAL DEFAULT 0,
+             expiry_date TEXT,
+             stock INTEGER DEFAULT 0,
+             updated_at INTEGER
+           );`
         );
-      `);
 
-      // Índice por código de barras
-      await run(tx, `CREATE INDEX IF NOT EXISTS idx_products_barcode ON products(barcode);`);
-
-      // Tabla de categorías (opcional, para futura administración)
-      await run(tx, `
-        CREATE TABLE IF NOT EXISTS categories (
-          id INTEGER PRIMARY KEY NOT NULL,
-          name TEXT UNIQUE NOT NULL
+        // Crear índice
+        tx.executeSql(
+          `CREATE INDEX IF NOT EXISTS idx_products_barcode ON products(barcode);`
         );
-      `);
 
-      // Semillas mínimas de categorías
-      const defaults = ['Bebidas','Abarrotes','Panes','Postres','Quesos','Cecinas','Helados','Hielo','Mascotas','Aseo'];
-      for (const name of defaults) {
-        await run(tx, `INSERT OR IGNORE INTO categories(name) VALUES (?);`, [name]);
+        // Crear tabla de categorías
+        tx.executeSql(
+          `CREATE TABLE IF NOT EXISTS categories (
+             id INTEGER PRIMARY KEY NOT NULL,
+             name TEXT UNIQUE NOT NULL
+           );`
+        );
+
+        // Insertar categorías por defecto
+        const defaults = [
+          'Bebidas',
+          'Abarrotes',
+          'Panes',
+          'Postres',
+          'Quesos',
+          'Cecinas',
+          'Helados',
+          'Hielo',
+          'Mascotas',
+          'Aseo'
+        ];
+        defaults.forEach((cat) => {
+          tx.executeSql(
+            `INSERT OR IGNORE INTO categories(name) VALUES (?);`,
+            [cat]
+          );
+        });
+      },
+      (error) => {
+        // Si falla cualquier sentencia, se rechaza la promesa
+        console.warn('Error al inicializar la base de datos', error);
+        reject(error);
+      },
+      () => {
+        // Éxito: resolver la promesa
+        resolve();
       }
-    }, reject, resolve);
+    );
   });
 }
 
