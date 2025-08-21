@@ -4,6 +4,7 @@ import {
   View, Text, TextInput, Button, Alert, Modal, StyleSheet,
   TouchableOpacity, FlatList, ActivityIndicator, Platform
 } from 'react-native';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import ScannerScreen from './ScannerScreen';
 import { upsertProduct, listCategories, addCategory, getProductByBarcode, initDB } from '../db';
 import { pushProductRemoteSafe } from '../sync';
@@ -18,6 +19,15 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
   const [salePrice, setSalePrice] = useState(String(initial?.salePrice ?? ''));
   const [expiryDate, setExpiryDate] = useState(initial?.expiryDate || '');
   const [stock, setStock] = useState(String(initial?.stock ?? ''));
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [expiryDateObj, setExpiryDateObj] = useState(initial?.expiryDate ? new Date(initial.expiryDate) : null);
+  const fmtDate = (d) => {
+    if (!d || isNaN(d.getTime())) return '';
+    const y = d.getFullYear();
+    const m = String(d.getMonth()+1).padStart(2,'0');
+    const day = String(d.getDate()).padStart(2,'0');
+    return `${y}-${m}-${day}`; // ISO corto
+  };
 
   // -------- categorías --------
   const [categories, setCategories] = useState([]);
@@ -83,8 +93,11 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
 
     try {
       setSaving(true);
-      await upsertProduct(payload);         // guarda local (SQLite)
-      await pushProductRemoteSafe(payload); // sube a Supabase (o encola offline)
+      await upsertProduct(payload);
+      try {
+        const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error('timeout remote push')), 8000));
+        await Promise.race([pushProductRemoteSafe(payload), timeout]);
+      } catch (e) { console.warn('push remoto falló/timeout:', e?.message || e); }
       onSaved && onSaved();
     } catch (e) {
       console.error('Error al guardar producto:', e);
@@ -193,61 +206,34 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
           <View style={{ height: 8 }} />
 
           <Text style={{ fontWeight: '600', marginBottom: 6 }}>➕ Nueva categoría</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="Ej: Snacks"
-            value={newCategoryName}
-            onChangeText={setNewCategoryName}
+          <View style={{ marginBottom: 10 }}>
+        <Text style={{ fontWeight: '600', marginBottom: 6 }}>Fecha de caducidad</Text>
+        <TouchableOpacity
+          style={[styles.input, { justifyContent:'center' }]}
+          onPress={() => setShowDatePicker(true)}
+          activeOpacity={0.8}
+        >
+          <Text style={{ color: expiryDate ? '#111' : '#888' }}>
+            {expiryDate || 'Selecciona una fecha'}
+          </Text>
+        </TouchableOpacity>
+        {showDatePicker && (
+          <DateTimePicker
+            mode="date"
+            value={expiryDateObj || new Date()}
+            display={Platform.OS === 'ios' ? 'inline' : 'default'}
+            onChange={(event, date) => {
+              if (Platform.OS !== 'ios') setShowDatePicker(false);
+              if (date) {
+                setExpiryDateObj(date);
+                const s = fmtDate(date);
+                setExpiryDate(s);
+              }
+            }}
+            minimumDate={new Date()}
           />
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 6 }}>
-            <Button title="Cerrar" onPress={() => setCatSelectOpen(false)} />
-            {creatingCategory ? (
-              <View style={{ paddingHorizontal: 16, justifyContent: 'center' }}>
-                <ActivityIndicator />
-              </View>
-            ) : (
-              <Button title="Crear" onPress={createCategory} />
-            )}
-          </View>
-        </View>
+        )}
       </View>
-    </Modal>
-  );
-
-  return (
-    <View style={{ padding: 12, gap: 8 }}>
-      <Text style={styles.title}>{initial ? 'Editar producto' : 'Nuevo producto'}</Text>
-
-      <TextInput
-        style={styles.input}
-        placeholder="Código de barras"
-        value={barcode}
-        onChangeText={setBarcode}
-      />
-      <Button title="📷 Escanear código" onPress={() => setScanOpen(true)} />
-
-      <CategoryField />
-
-      <TextInput
-        style={styles.input}
-        placeholder="Precio de compra"
-        value={purchasePrice}
-        onChangeText={setPurchasePrice}
-        keyboardType={Platform.OS === 'android' ? 'numeric' : 'decimal-pad'}
-      />
-      <TextInput
-        style={styles.input}
-        placeholder="Precio de venta"
-        value={salePrice}
-        onChangeText={setSalePrice}
-        keyboardType={Platform.OS === 'android' ? 'numeric' : 'decimal-pad'}
-      />
-      <TextInput
-        style={styles.input}
-        placeholder="Fecha de caducidad (YYYY-MM-DD)"
-        value={expiryDate}
-        onChangeText={setExpiryDate}
-      />
       <TextInput
         style={styles.input}
         placeholder="Stock"
