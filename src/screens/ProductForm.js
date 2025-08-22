@@ -8,11 +8,11 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import ScannerScreen from './ScannerScreen';
 import { upsertProduct, listCategories, addCategory, getProductByBarcode, initDB } from '../db';
 import { pushProductRemoteSafe } from '../sync';
-// import { logError } from '../errorLogger'; // si usas logger
 
 export default function ProductForm({ initial, onSaved, onCancel }) {
   // -------- formulario --------
   const [barcode, setBarcode] = useState(initial?.barcode || '');
+  const [name, setName] = useState(initial?.name || '');             // 🔹 NUEVO
   const [category, setCategory] = useState(initial?.category || '');
   const [purchasePrice, setPurchasePrice] = useState(String(initial?.purchasePrice ?? ''));
   const [salePrice, setSalePrice] = useState(String(initial?.salePrice ?? ''));
@@ -48,29 +48,27 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
     (async () => {
       try {
         try { await initDB(); } catch (e) {
-          // logError?.('db_init', e);
           Alert.alert('DB', 'Error inicializando la base de datos');
         }
         try {
           const rows = await listCategories();
           setCategories(rows);
         } catch (e) {
-          // logError?.('categories_load', e);
           Alert.alert('Error', 'No se pudieron cargar categorías.');
         }
-      } catch (e) {
-        // logError?.('form_boot', e);
-      }
+      } catch (e) {}
     })();
   }, []);
 
   // ------------------- guardar producto -------------------
   const save = async () => {
     if (!barcode) return Alert.alert('Error', 'El código de barras es obligatorio');
+    if (!name) return Alert.alert('Error', 'El nombre es obligatorio');           // 🔹 NUEVO
     if (!category) return Alert.alert('Error', 'La categoría es obligatoria');
 
     const payload = {
       barcode: String(barcode).trim(),
+      name: String(name).trim(),                                                 // 🔹 NUEVO
       category: String(category).trim(),
       purchasePrice: purchasePrice !== '' ? String(purchasePrice).trim() : '0',
       salePrice: salePrice !== '' ? String(salePrice).trim() : '0',
@@ -84,6 +82,7 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
         const exists = await getProductByBarcode(payload.barcode);
         if (exists) {
           Alert.alert('Duplicado', 'Ese código ya existe, se cargará para edición');
+          setName(exists.name || '');                                            // 🔹 NUEVO
           setCategory(exists.category || '');
           setPurchasePrice(String(exists.purchase_price ?? ''));
           setSalePrice(String(exists.sale_price ?? ''));
@@ -100,21 +99,18 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
       // 1) Guardar LOCAL siempre
       await upsertProduct(payload);
 
-      // 2) Intento remoto NO bloqueante (con timeout)
-      try {
-        const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error('timeout remote push')), 8000));
-        await Promise.race([pushProductRemoteSafe(payload), timeout]);
-      } catch (e) {
-        console.warn('push remoto falló/timeout:', e?.message || e);
-      }
-
-      // 3) Cerrar
+      // 2) Cerrar inmediatamente la UI
       onSaved && onSaved();
+      setSaving(false);
+
+      // 3) Push remoto completamente en segundo plano (no bloquea)
+      pushProductRemoteSafe(payload).catch(e => {
+        console.warn('push remoto falló:', e?.message || e);
+      });
+
     } catch (e) {
       console.error('Error al guardar producto:', e);
-      // logError?.('product_save', e);
       Alert.alert('Error', 'No se pudo guardar el producto');
-    } finally {
       setSaving(false);
     }
   };
@@ -135,12 +131,7 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
         setCreatingCategory(false);
         return;
       }
-
-      // Intentar asegurar BD
-      try { await initDB(); } catch (e) {
-        console.warn("Advertencia: Falló al inicializar BD antes de crear categoría", e);
-      }
-
+      try { await initDB(); } catch (e) {}
       await addCategory(name);
       const rows = await listCategories();
       setCategories(rows);
@@ -149,14 +140,12 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
       setCatSelectOpen(false);
     } catch (e) {
       console.error('Error al crear categoría:', e);
-      // logError?.('category_add', e);
       Alert.alert('Error', 'No se pudo crear la categoría: ' + (e.message || 'Error desconocido'));
     } finally {
       setCreatingCategory(false);
     }
   };
 
-  // ------------------- UI: campo categoría -------------------
   const CategoryField = () => (
     <View style={{ marginBottom: 10 }}>
       <Text style={{ fontWeight: '600', marginBottom: 6 }}>Categoría</Text>
@@ -172,7 +161,6 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
     </View>
   );
 
-  // ------------------- UI: modal selección de categoría -------------------
   const CategorySelectModal = () => (
     <Modal
       visible={catSelectOpen}
@@ -230,6 +218,14 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
         <View style={{ width: 8 }} />
         <Button title="📷 Escanear" onPress={() => setScanOpen(true)} />
       </View>
+
+      {/* 🔹 Campo Nombre de producto */}
+      <TextInput
+        style={styles.input}
+        placeholder="Nombre del producto"
+        value={name}
+        onChangeText={setName}
+      />
 
       <CategoryField />
 
