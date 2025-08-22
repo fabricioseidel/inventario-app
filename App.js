@@ -86,4 +86,68 @@ export default function App() {
   }
 
   return (
-    <SafeArea
+    <SafeAreaView style={styles.container}>
+      <Text style={styles.title}>📦 Inventario OlivoMarket (SQLite)</Text>
+
+      <View style={{ marginBottom: 10 }}>
+        <Button title="➕ Nuevo producto" onPress={onCreate} />
+        <View style={{ height: 8 }} />
+        <Button title="💰 Vender" onPress={() => setOpenSell(true)} />
+        <View style={{ height: 8 }} />
+        <Button title="📊 Exportar CSV" onPress={exportCSVFile} />
+        <View style={{ height: 8 }} />
+        <Button title="🧰 Exportar JSON" onPress={exportJSONFile} />
+      </View>
+
+      <Text style={styles.subtitle}>Productos ({products.length})</Text>
+      <FlatList
+        data={products}
+        keyExtractor={(item) => String(item.id)}
+        renderItem={({ item }) => (
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>{item.name || '(Sin nombre)'}</Text>
+            <Text>Categoría: {item.category || '(Sin categoría)'}</Text>
+            <Text>Código: {item.barcode}</Text>
+            <Text>Compra: ${item.purchase_price ?? 0} | Venta: ${item.sale_price ?? 0}</Text>
+            <Text>Vence: {item.expiry_date || '—'} | Stock: {item.stock ?? 0}</Text>
+            <View style={styles.row}>
+              <Button title="✏️ Editar" onPress={() => onEdit(item)} />
+              <Button title="🗑️ Eliminar" onPress={() => onDelete(item)} color="#b00020" />
+            </View>
+          </View>
+        )}
+      />
+
+      {/* Formulario de producto */}
+      <Modal visible={openForm} animationType="slide" onRequestClose={() => setOpenForm(false)}>
+        <SafeAreaView style={{ flex: 1 }}>
+          <ProductForm
+            initial={editing}
+            onSaved={onSaved}
+            onCancel={() => setOpenForm(false)}
+          />
+        </SafeAreaView>
+      </Modal>
+
+      {/* Pantalla de ventas */}
+      <Modal visible={openSell} animationType="slide" onRequestClose={() => setOpenSell(false)}>
+        <SafeAreaView style={{ flex:1 }}>
+          <SellScreen
+            onClose={() => setOpenSell(false)}
+            onSold={async () => { setOpenSell(false); await refresh(); }}
+          />
+        </SafeAreaView>
+      </Modal>
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, padding: 16, backgroundColor: '#fff' },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  title: { fontSize: 22, fontWeight: 'bold', textAlign: 'center', marginBottom: 12 },
+  subtitle: { fontSize: 16, fontWeight: '700', marginVertical: 8 },
+  card: { backgroundColor: '#eef6ff', borderRadius: 10, padding: 12, marginBottom: 10 },
+  cardTitle: { fontWeight: '700', marginBottom: 4 },
+  row: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 8 },
+});
