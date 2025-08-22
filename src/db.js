@@ -1,20 +1,18 @@
 // src/db.js
 import * as SQLite from 'expo-sqlite';
 
-let db;
-
-// Abre una única instancia
-function open() {
-  if (!db) db = SQLite.openDatabase('olivomarket.db');
-  return db;
+let _db = null;
+function db() {
+  if (!_db) _db = SQLite.openDatabase('olivomarket.db');
+  return _db;
 }
 
-// Inicializa todas las tablas requeridas
+/** Inicialización de BD y tablas */
 export function initDB() {
   return new Promise((resolve, reject) => {
-    open().transaction(
+    db().transaction(
       (tx) => {
-        // ----- Productos -----
+        // -------- Productos --------
         tx.executeSql(`
           CREATE TABLE IF NOT EXISTS products (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -30,7 +28,7 @@ export function initDB() {
         `);
         tx.executeSql(`CREATE INDEX IF NOT EXISTS idx_products_barcode ON products(barcode);`);
 
-        // ----- Categorías (semillas mínimas) -----
+        // -------- Categorías (semillas) --------
         tx.executeSql(`
           CREATE TABLE IF NOT EXISTS categories (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -42,7 +40,7 @@ export function initDB() {
           tx.executeSql(`INSERT OR IGNORE INTO categories(name) VALUES (?);`, [cat]);
         });
 
-        // ----- Ventas -----
+        // -------- Ventas --------
         tx.executeSql(`
           CREATE TABLE IF NOT EXISTS sales (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -51,6 +49,8 @@ export function initDB() {
             payment_method TEXT,
             cash_received REAL,
             change_given REAL,
+            discount REAL,
+            tax REAL,
             notes TEXT
           );
         `);
@@ -67,7 +67,7 @@ export function initDB() {
           );
         `);
 
-        // Opcional: soporte para TemplateEditor
+        // -------- Soporte plantillas (por compatibilidad) --------
         tx.executeSql(`
           CREATE TABLE IF NOT EXISTS templates (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -83,20 +83,21 @@ export function initDB() {
           );
         `);
       },
-      reject,
+      (err) => reject(err),
       () => resolve(true)
     );
   });
 }
 
-// Utilidad
-function rows(res) {
+/* Utilidad: convertir rows a array */
+function rowsToArray(res) {
   const out = [];
   for (let i = 0; i < res.rows.length; i++) out.push(res.rows.item(i));
   return out;
 }
 
-// -------- Productos --------
+/* ====================== PRODUCTS ====================== */
+
 export function insertOrUpdateProduct(p) {
   const now = Date.now();
   const payload = {
@@ -111,7 +112,7 @@ export function insertOrUpdateProduct(p) {
   if (!payload.barcode) return Promise.reject(new Error('barcode requerido'));
 
   return new Promise((resolve, reject) => {
-    open().transaction(
+    db().transaction(
       (tx) => {
         tx.executeSql(
           `INSERT INTO products (barcode, name, category, purchase_price, sale_price, expiry_date, stock, updated_at)
@@ -136,7 +137,7 @@ export function insertOrUpdateProduct(p) {
           ]
         );
       },
-      reject,
+      (err) => reject(err),
       () => resolve(true)
     );
   });
@@ -144,11 +145,11 @@ export function insertOrUpdateProduct(p) {
 
 export function getProductByBarcode(barcode) {
   return new Promise((resolve, reject) => {
-    open().transaction((tx) => {
+    db().transaction((tx) => {
       tx.executeSql(
         `SELECT * FROM products WHERE barcode = ? LIMIT 1;`,
         [String(barcode)],
-        (_,_res) => resolve(_res.rows.length ? _res.rows.item(0) : null)
+        (_, res) => resolve(res.rows.length ? res.rows.item(0) : null)
       );
     }, reject);
   });
@@ -156,11 +157,11 @@ export function getProductByBarcode(barcode) {
 
 export function listProducts() {
   return new Promise((resolve, reject) => {
-    open().transaction((tx) => {
+    db().transaction((tx) => {
       tx.executeSql(
         `SELECT * FROM products ORDER BY updated_at DESC, name ASC, id DESC;`,
         [],
-        (_,_res) => resolve(rows(_res))
+        (_, res) => resolve(rowsToArray(res))
       );
     }, reject);
   });
@@ -168,7 +169,7 @@ export function listProducts() {
 
 export function deleteProductByBarcode(barcode) {
   return new Promise((resolve, reject) => {
-    open().transaction((tx) => {
+    db().transaction((tx) => {
       tx.executeSql(`DELETE FROM products WHERE barcode = ?;`, [String(barcode)]);
     }, reject, () => resolve(true));
   });
@@ -176,16 +177,16 @@ export function deleteProductByBarcode(barcode) {
 
 export function clearAllProducts() {
   return new Promise((resolve, reject) => {
-    open().transaction((tx) => {
+    db().transaction((tx) => {
       tx.executeSql(`DELETE FROM products;`);
     }, reject, () => resolve(true));
   });
 }
 
-// Export ordenado (para CSV/JSON)
+/* Export ordenado para CSV/JSON */
 export function exportAllProductsOrdered() {
   return new Promise((resolve, reject) => {
-    open().transaction((tx) => {
+    db().transaction((tx) => {
       tx.executeSql(
         `SELECT
            barcode,
@@ -199,56 +200,68 @@ export function exportAllProductsOrdered() {
          FROM products
          ORDER BY name ASC, id DESC;`,
         [],
-        (_,_res) => resolve(rows(_res)),
-        (_,_err) => { console.error('exportAllProductsOrdered:', _err); reject(_err); return false; }
+        (_, res) => resolve(rowsToArray(res)),
+        (_, err) => { console.error('exportAllProductsOrdered:', err); reject(err); return false; }
       );
     });
   });
 }
 
-// -------- Categorías --------
+/* ====================== CATEGORIES (mínimas) ====================== */
+
 export function listCategories() {
   return new Promise((resolve, reject) => {
-    open().transaction((tx) => {
-      tx.executeSql(`SELECT * FROM categories ORDER BY name ASC;`, [], (_,_res) => resolve(rows(_res)));
+    db().transaction((tx) => {
+      tx.executeSql(`SELECT * FROM categories ORDER BY name ASC;`, [], (_, res) => resolve(rowsToArray(res)));
     }, reject);
   });
 }
 
 export function addCategory(name) {
   return new Promise((resolve, reject) => {
-    open().transaction((tx) => {
+    db().transaction((tx) => {
       tx.executeSql(`INSERT OR IGNORE INTO categories(name) VALUES (?);`, [name]);
-      tx.executeSql(`SELECT * FROM categories WHERE name = ?;`, [name], (_,_res) => {
-        resolve(_res.rows.length ? _res.rows.item(0) : { id: 0, name });
+      tx.executeSql(`SELECT * FROM categories WHERE name = ?;`, [name], (_, res) => {
+        resolve(res.rows.length ? res.rows.item(0) : { id: 0, name });
       });
     }, reject);
   });
 }
 
-// -------- Ventas --------
-export function recordSale(sale) {
-  const items = Array.isArray(sale.items) ? sale.items : [];
-  const total = items.reduce((acc, it) => acc + Number(it.qty || 0) * Number(it.unitPrice || 0), 0);
+/* ====================== SALES ====================== */
+/**
+ * Registra una venta.
+ * @param {Array} cart - elementos con { barcode, name, unit_price, qty }
+ * @param {Object} opts - { paymentMethod, amountPaid, note, discount, tax }
+ */
+export function recordSale(cart, opts = {}) {
+  const items = Array.isArray(cart) ? cart : [];
+  const totalRaw = items.reduce((acc, it) => acc + Number(it.qty || 0) * Number(it.unit_price || 0), 0);
+  const discount = Number(opts.discount || 0);
+  const tax = Number(opts.tax || 0);
+  const total = Math.max(0, totalRaw - discount + tax);
+
   const ts = Date.now();
-  const payment = sale.paymentMethod || 'efectivo';
-  const cashReceived = Number(sale.cashReceived || 0);
+  const payment = opts.paymentMethod || 'efectivo';
+  const cashReceived = Number(opts.amountPaid || 0);
   const change = Math.max(0, cashReceived - total);
+  const notes = opts.note || null;
 
   return new Promise((resolve, reject) => {
-    open().transaction(
+    db().transaction(
       (tx) => {
+        // Insert venta
         tx.executeSql(
-          `INSERT INTO sales (ts, total, payment_method, cash_received, change_given, notes)
-           VALUES (?, ?, ?, ?, ?, ?);`,
-          [ts, total, payment, cashReceived, change, sale.notes || null],
-          (_insert, res) => {
+          `INSERT INTO sales (ts, total, payment_method, cash_received, change_given, discount, tax, notes)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?);`,
+          [ts, total, payment, cashReceived, change, discount, tax, notes],
+          (_, res) => {
             const saleId = res.insertId;
 
-            // Items + descuento stock
+            // Insert items + descontar stock
             items.forEach((it) => {
               const qty = Number(it.qty || 0);
-              const unit = Number(it.unitPrice || 0);
+              const unit = Number(it.unit_price || 0);
               const subtotal = qty * unit;
 
               tx.executeSql(
@@ -257,6 +270,7 @@ export function recordSale(sale) {
                 [saleId, String(it.barcode), it.name || null, qty, unit, subtotal]
               );
 
+              // Descontar stock (sin negativos)
               tx.executeSql(
                 `UPDATE products
                    SET stock = CASE WHEN IFNULL(stock,0) - ? < 0 THEN 0 ELSE IFNULL(stock,0) - ? END,
@@ -268,8 +282,126 @@ export function recordSale(sale) {
           }
         );
       },
-      reject,
+      (err) => reject(err),
       () => resolve({ ok: true, ts })
+    );
+  });
+}
+
+/* Consultas útiles de ventas (por si luego agregas historial/export) */
+export function listRecentSales(limit = 50) {
+  return new Promise((resolve, reject) => {
+    db().transaction((tx) => {
+      tx.executeSql(
+        `SELECT id, ts, total, payment_method, cash_received, change_given, discount, tax
+         FROM sales ORDER BY ts DESC LIMIT ?;`,
+        [limit],
+        (_, res) => resolve(rowsToArray(res))
+      );
+    }, reject);
+  });
+}
+
+export function getSaleWithItems(saleId) {
+  return new Promise((resolve, reject) => {
+    db().transaction((tx) => {
+      tx.executeSql(`SELECT * FROM sales WHERE id = ?;`, [saleId], (_, sres) => {
+        if (!sres.rows.length) return resolve(null);
+        const sale = sres.rows.item(0);
+        tx.executeSql(
+          `SELECT * FROM sale_items WHERE sale_id = ? ORDER BY id ASC;`,
+          [saleId],
+          (_, ires) => resolve({ sale, items: rowsToArray(ires) })
+        );
+      });
+    }, reject);
+  });
+}
+
+export function exportSalesCSV(fromTs, toTs) {
+  return new Promise((resolve, reject) => {
+    const params = [];
+    let where = `WHERE 1=1`;
+    if (typeof fromTs === 'number') { where += ` AND s.ts >= ?`; params.push(fromTs); }
+    if (typeof toTs === 'number')   { where += ` AND s.ts <= ?`; params.push(toTs); }
+
+    db().transaction((tx) => {
+      tx.executeSql(
+        `SELECT s.id, s.ts, s.total, s.payment_method, s.cash_received, s.change_given, s.discount, s.tax,
+                i.barcode, i.name, i.qty, i.unit_price, i.subtotal
+           FROM sales s
+           JOIN sale_items i ON i.sale_id = s.id
+           ${where}
+           ORDER BY s.ts DESC, i.id ASC;`,
+        params,
+        (_, res) => {
+          let csv = 'sale_id,ts,total,payment_method,cash_received,change_given,discount,tax,barcode,name,qty,unit_price,subtotal\n';
+          for (let i = 0; i < res.rows.length; i++) {
+            const r = res.rows.item(i);
+            const line = [
+              r.id,
+              r.ts,
+              r.total,
+              r.payment_method || '',
+              r.cash_received ?? '',
+              r.change_given ?? '',
+              r.discount ?? 0,
+              r.tax ?? 0,
+              `"${String(r.barcode).replace(/"/g,'""')}"`,
+              `"${String(r.name || '').replace(/"/g,'""')}"`,
+              r.qty,
+              r.unit_price,
+              r.subtotal
+            ].join(',');
+            csv += line + '\n';
+          }
+          resolve(csv);
+        }
+      );
+    }, reject);
+  });
+}
+
+/* ====================== Templates (compat) ====================== */
+export function getTemplates() {
+  return new Promise((resolve, reject) => {
+    db().transaction((tx) => {
+      tx.executeSql(`SELECT * FROM templates ORDER BY name ASC;`, [], (_, res) => resolve(rowsToArray(res)));
+    }, reject);
+  });
+}
+
+export function getTemplateFields(templateId) {
+  return new Promise((resolve, reject) => {
+    db().transaction((tx) => {
+      tx.executeSql(
+        `SELECT * FROM template_fields WHERE template_id = ? ORDER BY id ASC;`,
+        [templateId],
+        (_, res) => resolve(rowsToArray(res))
+      );
+    }, reject);
+  });
+}
+
+export function saveTemplate(name, fields) {
+  return new Promise((resolve, reject) => {
+    db().transaction(
+      (tx) => {
+        tx.executeSql(`INSERT OR IGNORE INTO templates(name) VALUES (?);`, [name]);
+        tx.executeSql(`SELECT id FROM templates WHERE name = ?;`, [name], (_, res) => {
+          const id = res.rows.item(0)?.id;
+          if (!id) return;
+          tx.executeSql(`DELETE FROM template_fields WHERE template_id = ?;`, [id]);
+          (fields || []).forEach((f) => {
+            tx.executeSql(
+              `INSERT INTO template_fields (template_id, label) VALUES (?, ?);`,
+              [id, String(f.label || '').trim()]
+            );
+          });
+        });
+      },
+      (err) => reject(err),
+      () => resolve(true)
     );
   });
 }
