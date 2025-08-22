@@ -23,11 +23,12 @@ export function initDB() {
   return new Promise((resolve, reject) => {
     db.transaction(
       (tx) => {
-        // Crear tabla de productos
+        // Crear tabla de productos (ya incluye 'name')
         tx.executeSql(
           `CREATE TABLE IF NOT EXISTS products (
              id INTEGER PRIMARY KEY NOT NULL,
              barcode TEXT UNIQUE NOT NULL,
+             name TEXT,
              category TEXT,
              purchase_price REAL DEFAULT 0,
              sale_price REAL DEFAULT 0,
@@ -35,6 +36,22 @@ export function initDB() {
              stock INTEGER DEFAULT 0,
              updated_at INTEGER
            );`
+        );
+
+        // Migración defensiva: asegurar columna 'name' si venías de una versión anterior
+        tx.executeSql(
+          `PRAGMA table_info(products);`,
+          [],
+          (_, res) => {
+            let hasName = false;
+            for (let i = 0; i < res.rows.length; i++) {
+              const col = res.rows.item(i);
+              if ((col.name || '').toLowerCase() === 'name') { hasName = true; break; }
+            }
+            if (!hasName) {
+              tx.executeSql(`ALTER TABLE products ADD COLUMN name TEXT;`);
+            }
+          }
         );
 
         // Crear índice
@@ -71,12 +88,10 @@ export function initDB() {
         });
       },
       (error) => {
-        // Si falla cualquier sentencia, se rechaza la promesa
         console.warn('Error al inicializar la base de datos', error);
         reject(error);
       },
       () => {
-        // Éxito: resolver la promesa
         resolve();
       }
     );
@@ -88,6 +103,7 @@ export function upsertProduct(p) {
   const now = Date.now();
   const values = [
     p.barcode,
+    p.name || null,                         // <= name
     p.category || null,
     Number(p.purchasePrice || 0),
     Number(p.salePrice || 0),
@@ -101,9 +117,10 @@ export function upsertProduct(p) {
       await run(
         tx,
         `
-        INSERT INTO products (barcode, category, purchase_price, sale_price, expiry_date, stock, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO products (barcode, name, category, purchase_price, sale_price, expiry_date, stock, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(barcode) DO UPDATE SET
+          name=excluded.name,
           category=excluded.category,
           purchase_price=excluded.purchase_price,
           sale_price=excluded.sale_price,
@@ -168,6 +185,7 @@ export function exportAllProductsOrdered() {
         SELECT
           barcode,
           barcode AS id,
+          IFNULL(name, '') AS name,
           IFNULL(category, '') AS category,
           IFNULL(purchase_price, 0) AS purchasePrice,
           IFNULL(sale_price, 0) AS salePrice,
@@ -197,11 +215,11 @@ export function listCategories() {
 
 export function addCategory(name) {
   return new Promise((resolve, reject) => {
-    // Agrega un timeout para evitar bloqueos indefinidos
+    // Timeout para evitar bloqueos indefinidos
     const timeout = setTimeout(() => {
       reject(new Error('Timeout al crear categoría'));
-    }, 5000); // 5 segundos de timeout
-    
+    }, 5000);
+
     try {
       db.transaction(tx => {
         tx.executeSql(
@@ -216,7 +234,7 @@ export function addCategory(name) {
                 if (resultSelect.rows.length > 0) {
                   resolve(resultSelect.rows.item(0));
                 } else {
-                  resolve({ id: 0, name: name }); // Fallback por si no se encuentra
+                  resolve({ id: 0, name: name });
                 }
               },
               (_, selectError) => {
@@ -232,13 +250,13 @@ export function addCategory(name) {
             return false;
           }
         );
-      }, 
+      },
       txError => {
         clearTimeout(timeout);
         reject(txError);
       },
       () => {
-        // Transacción completada con éxito
+        // Transacción OK
       });
     } catch (e) {
       clearTimeout(timeout);
