@@ -8,8 +8,7 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import ScannerScreen from './ScannerScreen';
 import { upsertProduct, listCategories, addCategory, getProductByBarcode, initDB } from '../db';
 import { pushProductRemoteSafe } from '../sync';
-// Si tienes un logger de errores en tu proyecto, descomenta:
-// import { logError } from '../errorLogger';
+// import { logError } from '../errorLogger'; // si usas logger
 
 export default function ProductForm({ initial, onSaved, onCancel }) {
   // -------- formulario --------
@@ -19,15 +18,6 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
   const [salePrice, setSalePrice] = useState(String(initial?.salePrice ?? ''));
   const [expiryDate, setExpiryDate] = useState(initial?.expiryDate || '');
   const [stock, setStock] = useState(String(initial?.stock ?? ''));
-  const [showDatePicker, setShowDatePicker] = useState(false);
-  const [expiryDateObj, setExpiryDateObj] = useState(initial?.expiryDate ? new Date(initial.expiryDate) : null);
-  const fmtDate = (d) => {
-    if (!d || isNaN(d.getTime())) return '';
-    const y = d.getFullYear();
-    const m = String(d.getMonth()+1).padStart(2,'0');
-    const day = String(d.getDate()).padStart(2,'0');
-    return `${y}-${m}-${day}`; // ISO corto
-  };
 
   // -------- categorías --------
   const [categories, setCategories] = useState([]);
@@ -41,22 +31,35 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
   // -------- ui state --------
   const [saving, setSaving] = useState(false);
 
+  // -------- datepicker --------
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [expiryDateObj, setExpiryDateObj] = useState(
+    initial?.expiryDate ? new Date(initial.expiryDate) : null
+  );
+  const fmtDate = (d) => {
+    if (!d || isNaN(d.getTime())) return '';
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`; // ISO corto
+  };
+
   useEffect(() => {
     (async () => {
       try {
-        // Asegurarse de que la BD esté inicializada antes de intentar cargar categorías
-        try {
-          await initDB(); // Intentar inicializar la BD aquí también, como respaldo
-        } catch (e) {
-          console.warn("Advertencia: No se pudo reinicializar la BD en el formulario", e);
+        try { await initDB(); } catch (e) {
+          // logError?.('db_init', e);
+          Alert.alert('DB', 'Error inicializando la base de datos');
         }
-        
-        const rows = await listCategories();
-        setCategories(rows);
+        try {
+          const rows = await listCategories();
+          setCategories(rows);
+        } catch (e) {
+          // logError?.('categories_load', e);
+          Alert.alert('Error', 'No se pudieron cargar categorías.');
+        }
       } catch (e) {
-        console.error('Error al cargar categorías:', e);
-        // logError?.('categories_load', e);
-        Alert.alert('Error', 'No se pudieron cargar categorías. Intenta cerrar y abrir la app nuevamente.');
+        // logError?.('form_boot', e);
       }
     })();
   }, []);
@@ -88,16 +91,24 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
           setStock(String(exists.stock ?? ''));
           return;
         }
-      } catch (e) {/* noop */}
+      } catch (e) { /* noop */ }
     }
 
     try {
       setSaving(true);
+
+      // 1) Guardar LOCAL siempre
       await upsertProduct(payload);
+
+      // 2) Intento remoto NO bloqueante (con timeout)
       try {
         const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error('timeout remote push')), 8000));
         await Promise.race([pushProductRemoteSafe(payload), timeout]);
-      } catch (e) { console.warn('push remoto falló/timeout:', e?.message || e); }
+      } catch (e) {
+        console.warn('push remoto falló/timeout:', e?.message || e);
+      }
+
+      // 3) Cerrar
       onSaved && onSaved();
     } catch (e) {
       console.error('Error al guardar producto:', e);
@@ -124,30 +135,17 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
         setCreatingCategory(false);
         return;
       }
-      
-      // Asegurarse de que la BD esté inicializada antes de intentar crear una categoría
-      try {
-        await initDB(); // Intenta inicializar la BD antes de crear la categoría
-      } catch (e) {
+
+      // Intentar asegurar BD
+      try { await initDB(); } catch (e) {
         console.warn("Advertencia: Falló al inicializar BD antes de crear categoría", e);
       }
-      
-      // Agrega un timeout como medida de seguridad
-      const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Timeout al crear categoría')), 10000)
-      );
-      
-      // Usa Promise.race para evitar bloqueos indefinidos
-      await Promise.race([
-        addCategory(name),
-        timeoutPromise
-      ]);
-      
+
+      await addCategory(name);
       const rows = await listCategories();
       setCategories(rows);
       setCategory(name);
       setNewCategoryName('');
-      // Cierra el modal automáticamente si todo sale bien
       setCatSelectOpen(false);
     } catch (e) {
       console.error('Error al crear categoría:', e);
@@ -158,7 +156,7 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
     }
   };
 
-  // ------------------- UI: render categoría actual -------------------
+  // ------------------- UI: campo categoría -------------------
   const CategoryField = () => (
     <View style={{ marginBottom: 10 }}>
       <Text style={{ fontWeight: '600', marginBottom: 6 }}>Categoría</Text>
@@ -174,42 +172,87 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
     </View>
   );
 
-  // ------------------- UI: modal de selección de categoría -------------------
+  // ------------------- UI: modal selección de categoría -------------------
   const CategorySelectModal = () => (
     <Modal
       visible={catSelectOpen}
       transparent
       animationType="fade"
       onRequestClose={() => setCatSelectOpen(false)}
-      statusBarTranslucent
     >
       <View style={styles.modalBackdrop}>
         <View style={styles.modalCard}>
-          <Text style={{ fontSize: 18, fontWeight: '700', marginBottom: 8 }}>Seleccionar categoría</Text>
-
+          <Text style={styles.title}>Selecciona categoría</Text>
           <FlatList
             data={categories}
             keyExtractor={(item) => String(item.id)}
-            style={{ maxHeight: 260, marginBottom: 10 }}
-            ItemSeparatorComponent={() => <View style={{ height: 8 }} />}
             renderItem={({ item }) => (
               <TouchableOpacity
-                style={styles.catItem}
+                style={{ padding: 12, borderBottomWidth: 1, borderColor: '#eee' }}
                 onPress={() => { setCategory(item.name); setCatSelectOpen(false); }}
               >
                 <Text>{item.name}</Text>
               </TouchableOpacity>
             )}
-            ListEmptyComponent={<Text style={{ color: '#666' }}>Sin categorías</Text>}
           />
-
+          <View style={{ height: 12 }} />
+          <Text style={styles.subtitle}>Nueva categoría</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="Nombre de la categoría"
+            value={newCategoryName}
+            onChangeText={setNewCategoryName}
+          />
+          {creatingCategory ? (
+            <ActivityIndicator />
+          ) : (
+            <Button title="Crear" onPress={createCategory} />
+          )}
           <View style={{ height: 8 }} />
+          <Button title="Cerrar" onPress={() => setCatSelectOpen(false)} color="#b00020" />
+        </View>
+      </View>
+    </Modal>
+  );
 
-          <Text style={{ fontWeight: '600', marginBottom: 6 }}>➕ Nueva categoría</Text>
-          <View style={{ marginBottom: 10 }}>
+  return (
+    <View style={{ flex: 1, padding: 16, backgroundColor: '#fff' }}>
+      <Text style={styles.title}>{initial ? 'Editar Producto' : 'Nuevo Producto'}</Text>
+
+      <View style={styles.row}>
+        <TextInput
+          style={[styles.input, { flex: 1 }]}
+          placeholder="Código de barras"
+          value={barcode}
+          onChangeText={setBarcode}
+          autoCapitalize="none"
+        />
+        <View style={{ width: 8 }} />
+        <Button title="📷 Escanear" onPress={() => setScanOpen(true)} />
+      </View>
+
+      <CategoryField />
+
+      <TextInput
+        style={styles.input}
+        placeholder="Precio de compra"
+        value={purchasePrice}
+        onChangeText={setPurchasePrice}
+        keyboardType={Platform.OS === 'android' ? 'numeric' : 'decimal-pad'}
+      />
+      <TextInput
+        style={styles.input}
+        placeholder="Precio de venta"
+        value={salePrice}
+        onChangeText={setSalePrice}
+        keyboardType={Platform.OS === 'android' ? 'numeric' : 'decimal-pad'}
+      />
+
+      {/* Fecha de caducidad con DatePicker */}
+      <View style={{ marginBottom: 10 }}>
         <Text style={{ fontWeight: '600', marginBottom: 6 }}>Fecha de caducidad</Text>
         <TouchableOpacity
-          style={[styles.input, { justifyContent:'center' }]}
+          style={[styles.input, { justifyContent: 'center' }]}
           onPress={() => setShowDatePicker(true)}
           activeOpacity={0.8}
         >
@@ -234,6 +277,7 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
           />
         )}
       </View>
+
       <TextInput
         style={styles.input}
         placeholder="Stock"
@@ -269,6 +313,9 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: '#ddd', borderRadius: 6,
     padding: 10, marginBottom: 8, backgroundColor: '#fff'
   },
+  subtitle: { fontSize: 16, fontWeight: '600', marginBottom: 8 },
+  container: { flex: 1, padding: 16, backgroundColor: '#fff' },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   selectButton: {
     borderWidth: 1, borderColor: '#ddd', borderRadius: 6,
     padding: 12, backgroundColor: '#fff'
