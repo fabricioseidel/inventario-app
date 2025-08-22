@@ -1,6 +1,9 @@
 // src/screens/SellScreen.js
 import React, { useMemo, useState } from 'react';
-import { View, Text, TextInput, Button, FlatList, Alert, StyleSheet, Modal, SafeAreaView, TouchableOpacity } from 'react-native';
+import {
+  View, Text, TextInput, Button, FlatList, Alert,
+  StyleSheet, Modal, SafeAreaView, TouchableOpacity
+} from 'react-native';
 import ScannerScreen from './ScannerScreen';
 import { getProductByBarcode, recordSale } from '../db';
 
@@ -9,17 +12,17 @@ const PMETHODS = ['efectivo', 'debito', 'credito', 'transferencia'];
 export default function SellScreen({ onClose, onSold }) {
   const [scanOpen, setScanOpen] = useState(false);
   const [code, setCode] = useState('');
-  const [cart, setCart] = useState([]);
+  const [cart, setCart] = useState([]); // [{ barcode, name, unit_price, qty, stock }]
   const [paymentMethod, setPaymentMethod] = useState('efectivo');
-  const [cashReceived, setCashReceived] = useState('');
-  const [notes, setNotes] = useState('');
+  const [amountPaid, setAmountPaid] = useState('');
+  const [note, setNote] = useState('');
   const [saving, setSaving] = useState(false);
 
   const total = useMemo(
-    () => cart.reduce((acc, i) => acc + (Number(i.unitPrice) * Number(i.qty)), 0),
+    () => cart.reduce((acc, i) => acc + (Number(i.unit_price) * Number(i.qty)), 0),
     [cart]
   );
-  const change = useMemo(() => Math.max(0, Number(cashReceived || 0) - total), [cashReceived, total]);
+  const change = useMemo(() => Math.max(0, Number(amountPaid || 0) - total), [amountPaid, total]);
 
   const addOrInc = (p) => {
     setCart(prev => {
@@ -29,10 +32,11 @@ export default function SellScreen({ onClose, onSold }) {
         copy[idx] = { ...copy[idx], qty: Number(copy[idx].qty) + 1 };
         return copy;
       }
+      // Mapea al formato que espera tu recordSale (unit_price)
       return [...prev, {
         barcode: p.barcode,
         name: p.name || p.category || '(Sin nombre)',
-        unitPrice: Number(p.sale_price || p.salePrice || 0),
+        unit_price: Number(p.sale_price ?? p.salePrice ?? 0),
         qty: 1,
         stock: Number(p.stock ?? 0)
       }];
@@ -72,6 +76,7 @@ export default function SellScreen({ onClose, onSold }) {
   const finalizeSale = async () => {
     if (cart.length === 0) return Alert.alert('Atención', 'El carrito está vacío.');
 
+    // Aviso de stock (no bloquea, solo advierte)
     const over = cart.filter(i => typeof i.stock === 'number' && i.stock < i.qty);
     if (over.length) {
       const list = over.map(i => `${i.name} (stock ${i.stock}, qty ${i.qty})`).join('\n');
@@ -88,25 +93,26 @@ export default function SellScreen({ onClose, onSold }) {
       if (!cont) return;
     }
 
-    if (paymentMethod === 'efectivo' && Number(cashReceived || 0) < total) {
+    if (paymentMethod === 'efectivo' && Number(amountPaid || 0) < total) {
       return Alert.alert('Atención', 'El monto recibido es menor al total.');
     }
 
-    const payload = {
-      items: cart.map(i => ({ barcode: i.barcode, name: i.name, qty: Number(i.qty), unitPrice: Number(i.unitPrice) })),
-      paymentMethod,
-      cashReceived: Number(cashReceived || 0),
-      notes
-    };
-
     try {
       setSaving(true);
-      await recordSale(payload);
+      // Tu firma actual: recordSale(cart, opts)
+      await recordSale(cart, {
+        paymentMethod,
+        amountPaid: Number(amountPaid || 0),
+        note,
+        discount: 0,
+        tax: 0
+      });
+
       Alert.alert('Venta registrada', 'La venta se guardó correctamente.');
       setCart([]);
       setPaymentMethod('efectivo');
-      setCashReceived('');
-      setNotes('');
+      setAmountPaid('');
+      setNote('');
       onSold && onSold();
       onClose && onClose(true);
     } catch (e) {
@@ -121,7 +127,7 @@ export default function SellScreen({ onClose, onSold }) {
     <View style={styles.line}>
       <View style={{ flex: 1 }}>
         <Text style={{ fontWeight:'700' }}>{item.name}</Text>
-        <Text style={{ color:'#555' }}>{item.barcode} · ${item.unitPrice} × {item.qty} = ${item.unitPrice * item.qty}</Text>
+        <Text style={{ color:'#555' }}>{item.barcode} · ${item.unit_price} × {item.qty} = ${item.unit_price * item.qty}</Text>
       </View>
       <View style={{ flexDirection:'row', gap:6 }}>
         <TouchableOpacity style={styles.btnMini} onPress={() => dec(item.barcode)}><Text>-</Text></TouchableOpacity>
@@ -182,8 +188,8 @@ export default function SellScreen({ onClose, onSold }) {
               <TextInput
                 style={[styles.input, { flex:0, width:120 }]}
                 keyboardType="numeric"
-                value={cashReceived}
-                onChangeText={setCashReceived}
+                value={amountPaid}
+                onChangeText={setAmountPaid}
                 placeholder="0"
               />
               <Text>Vuelto: ${change.toFixed(0)}</Text>
@@ -193,8 +199,8 @@ export default function SellScreen({ onClose, onSold }) {
           <TextInput
             style={[styles.input, { marginTop:8 }]}
             placeholder="Notas (opcional)"
-            value={notes}
-            onChangeText={setNotes}
+            value={note}
+            onChangeText={setNote}
           />
 
           <View style={{ height:8 }} />
@@ -204,7 +210,10 @@ export default function SellScreen({ onClose, onSold }) {
         </View>
 
         <Modal visible={scanOpen} animationType="fade" onRequestClose={() => setScanOpen(false)}>
-          <ScannerScreen onClose={() => setScanOpen(false)} onScanned={(code) => { setScanOpen(false); addByBarcode(code); }} />
+          <ScannerScreen
+            onClose={() => setScanOpen(false)}
+            onScanned={(scannedCode) => { setScanOpen(false); addByBarcode(scannedCode); }}
+          />
         </Modal>
       </View>
     </SafeAreaView>
@@ -214,7 +223,6 @@ export default function SellScreen({ onClose, onSold }) {
 const styles = StyleSheet.create({
   title: { fontSize: 18, fontWeight: '700', marginBottom: 10 },
   input: { borderWidth: 1, borderColor: '#ddd', borderRadius: 6, padding: 8, backgroundColor: '#fff', marginBottom: 8 },
-  row: { flexDirection: 'row', alignItems: 'center' },
   line: { flexDirection:'row', alignItems:'center', paddingVertical: 8, borderBottomWidth:1, borderColor:'#eee' },
   btnMini: { borderWidth:1, borderColor:'#ddd', borderRadius:6, paddingHorizontal:10, paddingVertical:6, backgroundColor:'#f8f8f8' },
   box: { borderWidth:1, borderColor:'#eee', borderRadius:12, padding:12, backgroundColor:'#fafafa' },
