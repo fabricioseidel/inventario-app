@@ -7,12 +7,20 @@ function db() {
   return _db;
 }
 
-/** Inicialización de BD y tablas */
+function rowsToArray(res) {
+  const out = [];
+  for (let i = 0; i < res.rows.length; i++) out.push(res.rows.item(i));
+  return out;
+}
+
+// ---------------- INIT ----------------
 export function initDB() {
   return new Promise((resolve, reject) => {
     db().transaction(
       (tx) => {
-        // -------- Productos --------
+        tx.executeSql(`PRAGMA foreign_keys = ON;`);
+
+        // products
         tx.executeSql(`
           CREATE TABLE IF NOT EXISTS products (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -28,7 +36,7 @@ export function initDB() {
         `);
         tx.executeSql(`CREATE INDEX IF NOT EXISTS idx_products_barcode ON products(barcode);`);
 
-        // -------- Categorías (semillas) --------
+        // categories
         tx.executeSql(`
           CREATE TABLE IF NOT EXISTS categories (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -40,7 +48,7 @@ export function initDB() {
           tx.executeSql(`INSERT OR IGNORE INTO categories(name) VALUES (?);`, [cat]);
         });
 
-        // -------- Ventas --------
+        // sales (plural) + sale_items
         tx.executeSql(`
           CREATE TABLE IF NOT EXISTS sales (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -67,7 +75,22 @@ export function initDB() {
           );
         `);
 
-        // -------- Soporte plantillas (por compatibilidad) --------
+        // compat: sale (singular) por si existía en builds viejos
+        tx.executeSql(`
+          CREATE TABLE IF NOT EXISTS sale (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts INTEGER NOT NULL,
+            total REAL NOT NULL,
+            payment_method TEXT,
+            cash_received REAL,
+            change_given REAL,
+            discount REAL,
+            tax REAL,
+            notes TEXT
+          );
+        `);
+
+        // templates (compatibilidad con TemplateEditor)
         tx.executeSql(`
           CREATE TABLE IF NOT EXISTS templates (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -83,31 +106,23 @@ export function initDB() {
           );
         `);
       },
-      (err) => reject(err),
+      reject,
       () => resolve(true)
     );
   });
 }
 
-/* Utilidad: convertir rows a array */
-function rowsToArray(res) {
-  const out = [];
-  for (let i = 0; i < res.rows.length; i++) out.push(res.rows.item(i));
-  return out;
-}
-
-/* ====================== PRODUCTS ====================== */
-
+// --------------- PRODUCTS ---------------
 export function insertOrUpdateProduct(p) {
   const now = Date.now();
   const payload = {
     barcode: String(p.barcode || '').trim(),
     name: p.name ?? null,
     category: p.category ?? null,
-    purchase_price: Number(p.purchasePrice ?? p.purchase_price ?? 0),
-    sale_price: Number(p.salePrice ?? p.sale_price ?? 0),
+    purchase_price: Number(p.purchasePrice ?? p.purchase_price ?? 0) || 0,
+    sale_price: Number(p.salePrice ?? p.sale_price ?? 0) || 0,
     expiry_date: p.expiryDate ?? p.expiry_date ?? null,
-    stock: Number(p.stock ?? 0)
+    stock: Number(p.stock ?? 0) || 0
   };
   if (!payload.barcode) return Promise.reject(new Error('barcode requerido'));
 
@@ -137,7 +152,7 @@ export function insertOrUpdateProduct(p) {
           ]
         );
       },
-      (err) => reject(err),
+      reject,
       () => resolve(true)
     );
   });
@@ -183,7 +198,6 @@ export function clearAllProducts() {
   });
 }
 
-/* Export ordenado para CSV/JSON */
 export function exportAllProductsOrdered() {
   return new Promise((resolve, reject) => {
     db().transaction((tx) => {
@@ -200,15 +214,13 @@ export function exportAllProductsOrdered() {
          FROM products
          ORDER BY name ASC, id DESC;`,
         [],
-        (_, res) => resolve(rowsToArray(res)),
-        (_, err) => { console.error('exportAllProductsOrdered:', err); reject(err); return false; }
+        (_, res) => resolve(rowsToArray(res))
       );
-    });
+    }, reject);
   });
 }
 
-/* ====================== CATEGORIES (mínimas) ====================== */
-
+// --------------- CATEGORIES ---------------
 export function listCategories() {
   return new Promise((resolve, reject) => {
     db().transaction((tx) => {
@@ -228,67 +240,84 @@ export function addCategory(name) {
   });
 }
 
-/* ====================== SALES ====================== */
+// --------------- SALES ---------------
 /**
  * Registra una venta.
- * @param {Array} cart - elementos con { barcode, name, unit_price, qty }
+ * @param {Array} cart - [{ barcode, name, unit_price, qty }]
  * @param {Object} opts - { paymentMethod, amountPaid, note, discount, tax }
  */
 export function recordSale(cart, opts = {}) {
   const items = Array.isArray(cart) ? cart : [];
-  const totalRaw = items.reduce((acc, it) => acc + Number(it.qty || 0) * Number(it.unit_price || 0), 0);
-  const discount = Number(opts.discount || 0);
-  const tax = Number(opts.tax || 0);
+  const totalRaw = items.reduce((acc, it) => acc + (Number(it.qty || 0) * Number(it.unit_price || 0)), 0);
+  const discount = Number(opts.discount || 0) || 0;
+  const tax = Number(opts.tax || 0) || 0;
   const total = Math.max(0, totalRaw - discount + tax);
 
   const ts = Date.now();
   const payment = opts.paymentMethod || 'efectivo';
-  const cashReceived = Number(opts.amountPaid || 0);
+  const cashReceived = Number(opts.amountPaid || 0) || 0;
   const change = Math.max(0, cashReceived - total);
   const notes = opts.note || null;
 
-  return new Promise((resolve, reject) => {
+  // Inserta en 'sales'; si falla por tabla inexistente, reintenta con 'sale'
+  const insertInto = (tableName) => new Promise((resolve, reject) => {
+    let firstError = null;
     db().transaction(
       (tx) => {
-        // Insert venta
+        const sql = `
+          INSERT INTO ${tableName} (ts, total, payment_method, cash_received, change_given, discount, tax, notes)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?);`;
+
         tx.executeSql(
-          `INSERT INTO sales (ts, total, payment_method, cash_received, change_given, discount, tax, notes)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?);`,
+          sql,
           [ts, total, payment, cashReceived, change, discount, tax, notes],
-          (_, res) => {
+          (_insert, res) => {
             const saleId = res.insertId;
 
-            // Insert items + descontar stock
             items.forEach((it) => {
-              const qty = Number(it.qty || 0);
-              const unit = Number(it.unit_price || 0);
+              const qty = Number(it.qty || 0) || 0;
+              const unit = Number(it.unit_price || 0) || 0;
               const subtotal = qty * unit;
 
               tx.executeSql(
                 `INSERT INTO sale_items (sale_id, barcode, name, qty, unit_price, subtotal)
                  VALUES (?, ?, ?, ?, ?, ?);`,
-                [saleId, String(it.barcode), it.name || null, qty, unit, subtotal]
+                [saleId, String(it.barcode), it.name || null, qty, unit, subtotal],
+                undefined,
+                (_, err) => { firstError = firstError || err; return true; }
               );
 
-              // Descontar stock (sin negativos)
               tx.executeSql(
                 `UPDATE products
                    SET stock = CASE WHEN IFNULL(stock,0) - ? < 0 THEN 0 ELSE IFNULL(stock,0) - ? END,
                        updated_at = ?
                  WHERE barcode = ?;`,
-                [qty, qty, ts, String(it.barcode)]
+                [qty, qty, ts, String(it.barcode)],
+                undefined,
+                (_, err) => { firstError = firstError || err; return true; }
               );
             });
-          }
+          },
+          // Error al insertar venta
+          (_, err) => { firstError = firstError || err; return true; }
         );
       },
-      (err) => reject(err),
-      () => resolve({ ok: true, ts })
+      // onError de la transacción: propaga el PRIMER error real
+      (txErr) => reject(firstError || txErr),
+      () => resolve({ ok: true, ts, table: tableName })
     );
+  });
+
+  return insertInto('sales').catch((err) => {
+    const msg = String(err?.message || err || '');
+    if (msg.includes('no such table') && msg.includes('sales')) {
+      return insertInto('sale');
+    }
+    throw err; // propaga con el detalle para que SellScreen lo muestre
   });
 }
 
-/* Consultas útiles de ventas (por si luego agregas historial/export) */
+// --------------- Ventas: consultas útiles ---------------
 export function listRecentSales(limit = 50) {
   return new Promise((resolve, reject) => {
     db().transaction((tx) => {
@@ -296,7 +325,20 @@ export function listRecentSales(limit = 50) {
         `SELECT id, ts, total, payment_method, cash_received, change_given, discount, tax
          FROM sales ORDER BY ts DESC LIMIT ?;`,
         [limit],
-        (_, res) => resolve(rowsToArray(res))
+        (_, res) => resolve(rowsToArray(res)),
+        (_, err) => {
+          const msg = String(err?.message || '');
+          if (msg.includes('no such table')) {
+            tx.executeSql(
+              `SELECT id, ts, total, payment_method, cash_received, change_given, discount, tax
+               FROM sale ORDER BY ts DESC LIMIT ?;`,
+              [limit],
+              (_, res2) => resolve(rowsToArray(res2))
+            );
+            return true;
+          }
+          return true;
+        }
       );
     }, reject);
   });
@@ -304,65 +346,24 @@ export function listRecentSales(limit = 50) {
 
 export function getSaleWithItems(saleId) {
   return new Promise((resolve, reject) => {
-    db().transaction((tx) => {
-      tx.executeSql(`SELECT * FROM sales WHERE id = ?;`, [saleId], (_, sres) => {
-        if (!sres.rows.length) return resolve(null);
-        const sale = sres.rows.item(0);
-        tx.executeSql(
-          `SELECT * FROM sale_items WHERE sale_id = ? ORDER BY id ASC;`,
-          [saleId],
-          (_, ires) => resolve({ sale, items: rowsToArray(ires) })
-        );
-      });
-    }, reject);
+    const tryRead = (table) => {
+      db().transaction((tx) => {
+        tx.executeSql(`SELECT * FROM ${table} WHERE id = ?;`, [saleId], (_, sres) => {
+          if (!sres.rows.length) return resolve(null);
+          const sale = sres.rows.item(0);
+          tx.executeSql(
+            `SELECT * FROM sale_items WHERE sale_id = ? ORDER BY id ASC;`,
+            [saleId],
+            (_, ires) => resolve({ sale, items: rowsToArray(ires) })
+          );
+        });
+      }, reject);
+    };
+    tryRead('sales');
   });
 }
 
-export function exportSalesCSV(fromTs, toTs) {
-  return new Promise((resolve, reject) => {
-    const params = [];
-    let where = `WHERE 1=1`;
-    if (typeof fromTs === 'number') { where += ` AND s.ts >= ?`; params.push(fromTs); }
-    if (typeof toTs === 'number')   { where += ` AND s.ts <= ?`; params.push(toTs); }
-
-    db().transaction((tx) => {
-      tx.executeSql(
-        `SELECT s.id, s.ts, s.total, s.payment_method, s.cash_received, s.change_given, s.discount, s.tax,
-                i.barcode, i.name, i.qty, i.unit_price, i.subtotal
-           FROM sales s
-           JOIN sale_items i ON i.sale_id = s.id
-           ${where}
-           ORDER BY s.ts DESC, i.id ASC;`,
-        params,
-        (_, res) => {
-          let csv = 'sale_id,ts,total,payment_method,cash_received,change_given,discount,tax,barcode,name,qty,unit_price,subtotal\n';
-          for (let i = 0; i < res.rows.length; i++) {
-            const r = res.rows.item(i);
-            const line = [
-              r.id,
-              r.ts,
-              r.total,
-              r.payment_method || '',
-              r.cash_received ?? '',
-              r.change_given ?? '',
-              r.discount ?? 0,
-              r.tax ?? 0,
-              `"${String(r.barcode).replace(/"/g,'""')}"`,
-              `"${String(r.name || '').replace(/"/g,'""')}"`,
-              r.qty,
-              r.unit_price,
-              r.subtotal
-            ].join(',');
-            csv += line + '\n';
-          }
-          resolve(csv);
-        }
-      );
-    }, reject);
-  });
-}
-
-/* ====================== Templates (compat) ====================== */
+// --------------- Templates (compat) ---------------
 export function getTemplates() {
   return new Promise((resolve, reject) => {
     db().transaction((tx) => {
@@ -400,7 +401,7 @@ export function saveTemplate(name, fields) {
           });
         });
       },
-      (err) => reject(err),
+      reject,
       () => resolve(true)
     );
   });
