@@ -1,266 +1,114 @@
 // src/db.js
 import * as SQLite from 'expo-sqlite';
 
-const DB_NAME = 'olivomarket.db';
-const db = SQLite.openDatabase(DB_NAME);
+let db;
 
-// Helpers
-const run = (tx, sql, args = []) =>
-  new Promise((resolve, reject) => {
-    tx.executeSql(
-      sql,
-      args,
-      (_, res) => resolve(res),
-      (_, err) => {
-        console.warn('SQL error:', err, 'in', sql);
-        reject(err);
-        return false;
-      }
-    );
-  });
-
-export function initDB() {
-  return new Promise((resolve, reject) => {
-    db.transaction(
-      (tx) => {
-        // Crear tabla de productos (ya incluye 'name')
-        tx.executeSql(
-          `CREATE TABLE IF NOT EXISTS products (
-             id INTEGER PRIMARY KEY NOT NULL,
-             barcode TEXT UNIQUE NOT NULL,
-             name TEXT,
-             category TEXT,
-             purchase_price REAL DEFAULT 0,
-             sale_price REAL DEFAULT 0,
-             expiry_date TEXT,
-             stock INTEGER DEFAULT 0,
-             updated_at INTEGER
-           );`
-        );
-
-        // Migración defensiva: asegurar columna 'name' si venías de una versión anterior
-        tx.executeSql(
-          `PRAGMA table_info(products);`,
-          [],
-          (_, res) => {
-            let hasName = false;
-            for (let i = 0; i < res.rows.length; i++) {
-              const col = res.rows.item(i);
-              if ((col.name || '').toLowerCase() === 'name') { hasName = true; break; }
-            }
-            if (!hasName) {
-              tx.executeSql(`ALTER TABLE products ADD COLUMN name TEXT;`);
-            }
-          }
-        );
-
-        // Crear índice
-        tx.executeSql(
-          `CREATE INDEX IF NOT EXISTS idx_products_barcode ON products(barcode);`
-        );
-
-        // Crear tabla de categorías
-        tx.executeSql(
-          `CREATE TABLE IF NOT EXISTS categories (
-             id INTEGER PRIMARY KEY NOT NULL,
-             name TEXT UNIQUE NOT NULL
-           );`
-        );
-
-        // Insertar categorías por defecto
-        const defaults = [
-          'Bebidas',
-          'Abarrotes',
-          'Panes',
-          'Postres',
-          'Quesos',
-          'Cecinas',
-          'Helados',
-          'Hielo',
-          'Mascotas',
-          'Aseo'
-        ];
-        defaults.forEach((cat) => {
-          tx.executeSql(
-            `INSERT OR IGNORE INTO categories(name) VALUES (?);`,
-            [cat]
-          );
-        });
-      },
-      (error) => {
-        console.warn('Error al inicializar la base de datos', error);
-        reject(error);
-      },
-      () => {
-        resolve();
-      }
-    );
-  });
-}
-
-// -------------------- Productos --------------------
-export function upsertProduct(p) {
-  const now = Date.now();
-  const values = [
-    p.barcode,
-    p.name || null,                         // <= name
-    p.category || null,
-    Number(p.purchasePrice || 0),
-    Number(p.salePrice || 0),
-    p.expiryDate || null,
-    Number(p.stock || 0),
-    now
-  ];
+export async function initDB() {
+  db = SQLite.openDatabase('olivomarket.db');
 
   return new Promise((resolve, reject) => {
-    db.transaction(async (tx) => {
-      await run(
-        tx,
-        `
-        INSERT INTO products (barcode, name, category, purchase_price, sale_price, expiry_date, stock, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(barcode) DO UPDATE SET
-          name=excluded.name,
-          category=excluded.category,
-          purchase_price=excluded.purchase_price,
-          sale_price=excluded.sale_price,
-          expiry_date=excluded.expiry_date,
-          stock=excluded.stock,
-          updated_at=excluded.updated_at;
-        `,
-        values
+    db.transaction(tx => {
+      tx.executeSql(
+        `CREATE TABLE IF NOT EXISTS products (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          barcode TEXT UNIQUE,
+          name TEXT,
+          category TEXT,
+          purchase_price REAL,
+          sale_price REAL,
+          expiry_date TEXT,
+          stock INTEGER
+        );`,
+        [],
+        () => resolve(),
+        (_, err) => {
+          console.error('initDB:', err);
+          reject(err);
+        }
       );
-      const res = await run(tx, `SELECT * FROM products WHERE barcode = ?;`, [p.barcode]);
-      resolve(res.rows.item(0));
-    }, reject);
+    });
   });
 }
 
-export function getProductByBarcode(barcode) {
+export async function insertOrUpdateProduct(p) {
   return new Promise((resolve, reject) => {
-    db.transaction(async (tx) => {
-      const res = await run(tx, `SELECT * FROM products WHERE barcode = ?;`, [barcode]);
-      resolve(res.rows.length ? res.rows.item(0) : null);
-    }, reject);
+    db.transaction(tx => {
+      tx.executeSql(
+        `INSERT INTO products (barcode, name, category, purchase_price, sale_price, expiry_date, stock)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(barcode) DO UPDATE SET
+           name=excluded.name,
+           category=excluded.category,
+           purchase_price=excluded.purchase_price,
+           sale_price=excluded.sale_price,
+           expiry_date=excluded.expiry_date,
+           stock=excluded.stock;`,
+        [
+          p.barcode,
+          p.name,
+          p.category,
+          parseFloat(p.purchasePrice) || 0,
+          parseFloat(p.salePrice) || 0,
+          p.expiryDate,
+          parseInt(p.stock) || 0,
+        ],
+        (_, result) => resolve(result),
+        (_, err) => {
+          console.error('insertOrUpdateProduct:', err);
+          reject(err);
+        }
+      );
+    });
   });
 }
 
-export function listProducts() {
+export async function listProducts() {
   return new Promise((resolve, reject) => {
-    db.transaction(async (tx) => {
-      const res = await run(tx, `
-        SELECT * FROM products
-        ORDER BY updated_at DESC, id DESC;
-      `);
-      const out = [];
-      for (let i = 0; i < res.rows.length; i++) out.push(res.rows.item(i));
-      resolve(out);
-    }, reject);
+    db.transaction(tx => {
+      tx.executeSql(
+        'SELECT * FROM products ORDER BY id DESC;',
+        [],
+        (_, { rows }) => resolve(rows._array),
+        (_, err) => {
+          console.error('listProducts:', err);
+          reject(err);
+        }
+      );
+    });
   });
 }
 
-export function deleteProductByBarcode(barcode) {
+export async function deleteProductByBarcode(barcode) {
   return new Promise((resolve, reject) => {
-    db.transaction(async (tx) => {
-      await run(tx, `DELETE FROM products WHERE barcode = ?;`, [barcode]);
-      resolve(true);
-    }, reject);
+    db.transaction(tx => {
+      tx.executeSql(
+        'DELETE FROM products WHERE barcode = ?;',
+        [barcode],
+        (_, result) => resolve(result),
+        (_, err) => {
+          console.error('deleteProductByBarcode:', err);
+          reject(err);
+        }
+      );
+    });
   });
 }
 
-export function clearAllProducts() {
+/**
+ * Exportar todos los productos ordenados por nombre
+ */
+export async function exportAllProductsOrdered() {
   return new Promise((resolve, reject) => {
-    db.transaction(async (tx) => {
-      await run(tx, `DELETE FROM products;`);
-      resolve(true);
-    }, reject);
-  });
-}
-
-// Export ordenado para consumo externo
-export function exportAllProductsOrdered() {
-  return new Promise((resolve, reject) => {
-    db.transaction(async (tx) => {
-      const res = await run(tx, `
-        SELECT
-          barcode,
-          barcode AS id,
-          IFNULL(name, '') AS name,
-          IFNULL(category, '') AS category,
-          IFNULL(purchase_price, 0) AS purchasePrice,
-          IFNULL(sale_price, 0) AS salePrice,
-          IFNULL(expiry_date, '') AS expiryDate,
-          IFNULL(stock, 0) AS stock
-        FROM products
-        ORDER BY updated_at DESC, id DESC;
-      `);
-      const rows = [];
-      for (let i = 0; i < res.rows.length; i++) rows.push(res.rows.item(i));
-      resolve(rows);
-    }, reject);
-  });
-}
-
-// -------------------- Categorías --------------------
-export function listCategories() {
-  return new Promise((resolve, reject) => {
-    db.transaction(async (tx) => {
-      const res = await run(tx, `SELECT * FROM categories ORDER BY name ASC;`);
-      const rows = [];
-      for (let i = 0; i < res.rows.length; i++) rows.push(res.rows.item(i));
-      resolve(rows);
-    }, reject);
-  });
-}
-
-export function addCategory(name) {
-  return new Promise((resolve, reject) => {
-    // Timeout para evitar bloqueos indefinidos
-    const timeout = setTimeout(() => {
-      reject(new Error('Timeout al crear categoría'));
-    }, 5000);
-
-    try {
-      db.transaction(tx => {
-        tx.executeSql(
-          `INSERT OR IGNORE INTO categories(name) VALUES (?);`,
-          [name],
-          (_, resultInsert) => {
-            tx.executeSql(
-              `SELECT * FROM categories WHERE name = ?;`,
-              [name],
-              (_, resultSelect) => {
-                clearTimeout(timeout);
-                if (resultSelect.rows.length > 0) {
-                  resolve(resultSelect.rows.item(0));
-                } else {
-                  resolve({ id: 0, name: name });
-                }
-              },
-              (_, selectError) => {
-                clearTimeout(timeout);
-                reject(selectError);
-                return false;
-              }
-            );
-          },
-          (_, insertError) => {
-            clearTimeout(timeout);
-            reject(insertError);
-            return false;
-          }
-        );
-      },
-      txError => {
-        clearTimeout(timeout);
-        reject(txError);
-      },
-      () => {
-        // Transacción OK
-      });
-    } catch (e) {
-      clearTimeout(timeout);
-      reject(e);
-    }
+    db.transaction(tx => {
+      tx.executeSql(
+        'SELECT * FROM products ORDER BY name ASC;',
+        [],
+        (_, { rows }) => resolve(rows._array),
+        (_, err) => {
+          console.error('exportAllProductsOrdered:', err);
+          reject(err);
+        }
+      );
+    });
   });
 }
