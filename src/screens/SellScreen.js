@@ -9,6 +9,18 @@ import { getProductByBarcode, recordSale } from '../db';
 
 const PMETHODS = ['efectivo', 'debito', 'credito', 'transferencia'];
 
+function formatError(e) {
+  if (!e) return 'Error desconocido';
+  if (typeof e === 'string') return e;
+  const parts = [];
+  if (e.message) parts.push(e.message);
+  if (e.code) parts.push(`(code: ${e.code})`);
+  // Algunos errores de expo-sqlite traen "nativeStackAndroid"/"userInfo"/"toString"
+  const extra = e.toString && e.toString();
+  if (extra && extra !== e.message) parts.push(extra);
+  return parts.filter(Boolean).join('\n');
+}
+
 export default function SellScreen({ onClose, onSold }) {
   const [scanOpen, setScanOpen] = useState(false);
   const [code, setCode] = useState('');
@@ -98,7 +110,6 @@ export default function SellScreen({ onClose, onSold }) {
 
     try {
       setSaving(true);
-      // Tu firma actual en db.js: recordSale(cart, { paymentMethod, amountPaid, note, ... })
       await recordSale(cart, {
         paymentMethod,
         amountPaid: Number(amountPaid || 0),
@@ -115,8 +126,8 @@ export default function SellScreen({ onClose, onSold }) {
       onSold && onSold();
       onClose && onClose(true);
     } catch (e) {
-      console.warn('recordSale error', e);
-      Alert.alert('Error', 'No se pudo registrar la venta. Revisa la base de datos o la consola.');
+      const msg = formatError(e);
+      Alert.alert('Error', `No se pudo registrar la venta.\n\nDetalle:\n${msg}`);
     } finally {
       setSaving(false);
     }
@@ -138,7 +149,6 @@ export default function SellScreen({ onClose, onSold }) {
 
   return (
     <SafeAreaView style={{ flex:1, backgroundColor:'#fff' }}>
-      {/* 🔧 IMPORTANTE: este contenedor ahora tiene flex:1, así el FlatList se ve */}
       <View style={{ flex:1, padding:16 }}>
         <Text style={styles.title}>Caja / Ventas</Text>
 
