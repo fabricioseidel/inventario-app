@@ -8,6 +8,7 @@ export async function initDB() {
 
   return new Promise((resolve, reject) => {
     db.transaction(tx => {
+      // Tabla principal
       tx.executeSql(
         `CREATE TABLE IF NOT EXISTS products (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -20,13 +21,43 @@ export async function initDB() {
           stock INTEGER
         );`,
         [],
-        () => resolve(),
+        () => {},
         (_, err) => {
-          console.error('initDB:', err);
+          console.error('initDB:create products:', err);
           reject(err);
+          return false;
         }
       );
-    });
+
+      // Migración defensiva: si venías de una tabla sin 'name'
+      tx.executeSql(
+        `PRAGMA table_info(products);`,
+        [],
+        (_, res) => {
+          let hasName = false;
+          for (let i = 0; i < res.rows.length; i++) {
+            const col = res.rows.item(i);
+            if ((col.name || '').toLowerCase() === 'name') { hasName = true; break; }
+          }
+          if (!hasName) {
+            tx.executeSql(
+              `ALTER TABLE products ADD COLUMN name TEXT;`,
+              [],
+              () => {},
+              (_, err2) => {
+                // Si falla aquí por lo que sea, no bloqueamos la app.
+                console.warn('initDB:migrate add name failed:', err2);
+                return false;
+              }
+            );
+          }
+        },
+        // OnError del PRAGMA (no bloquea)
+        () => false
+      );
+    },
+    (err) => { console.error('initDB:tx error:', err); reject(err); },
+    () => resolve());
   });
 }
 
@@ -44,18 +75,19 @@ export async function insertOrUpdateProduct(p) {
            expiry_date=excluded.expiry_date,
            stock=excluded.stock;`,
         [
-          p.barcode,
-          p.name,
-          p.category,
+          String(p.barcode),
+          p.name ?? null,
+          p.category ?? null,
           parseFloat(p.purchasePrice) || 0,
           parseFloat(p.salePrice) || 0,
-          p.expiryDate,
-          parseInt(p.stock) || 0,
+          p.expiryDate ?? null,
+          parseInt(p.stock, 10) || 0,
         ],
         (_, result) => resolve(result),
         (_, err) => {
           console.error('insertOrUpdateProduct:', err);
           reject(err);
+          return false;
         }
       );
     });
@@ -72,6 +104,7 @@ export async function listProducts() {
         (_, err) => {
           console.error('listProducts:', err);
           reject(err);
+          return false;
         }
       );
     });
@@ -83,11 +116,12 @@ export async function deleteProductByBarcode(barcode) {
     db.transaction(tx => {
       tx.executeSql(
         'DELETE FROM products WHERE barcode = ?;',
-        [barcode],
+        [String(barcode)],
         (_, result) => resolve(result),
         (_, err) => {
           console.error('deleteProductByBarcode:', err);
           reject(err);
+          return false;
         }
       );
     });
@@ -95,18 +129,33 @@ export async function deleteProductByBarcode(barcode) {
 }
 
 /**
- * Exportar todos los productos ordenados por nombre
+ * Exportar todos los productos con alias que export.js espera.
+ * - id        => barcode
+ * - purchasePrice => purchase_price
+ * - salePrice     => sale_price
+ * - expiryDate    => expiry_date
  */
 export async function exportAllProductsOrdered() {
   return new Promise((resolve, reject) => {
     db.transaction(tx => {
       tx.executeSql(
-        'SELECT * FROM products ORDER BY name ASC;',
+        `SELECT
+           barcode,
+           barcode AS id,
+           IFNULL(name, '') AS name,
+           IFNULL(category, '') AS category,
+           IFNULL(purchase_price, 0) AS purchasePrice,
+           IFNULL(sale_price, 0) AS salePrice,
+           IFNULL(expiry_date, '') AS expiryDate,
+           IFNULL(stock, 0) AS stock
+         FROM products
+         ORDER BY name ASC, id DESC;`,
         [],
         (_, { rows }) => resolve(rows._array),
         (_, err) => {
           console.error('exportAllProductsOrdered:', err);
           reject(err);
+          return false;
         }
       );
     });
