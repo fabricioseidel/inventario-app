@@ -1,8 +1,14 @@
 // src/screens/ProductForm.js
-import React, { useState } from 'react';
-import { View, Text, TextInput, Button, Alert, Modal, StyleSheet, SafeAreaView } from 'react-native';
+import React, { useMemo, useState } from 'react';
+import {
+  View, Text, TextInput, Button, Alert, Modal, StyleSheet, SafeAreaView, TouchableOpacity
+} from 'react-native';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import ScannerScreen from './ScannerScreen';
 import { insertOrUpdateProduct, getProductByBarcode } from '../db';
+
+// Rápidas por defecto (puedes editarlas)
+const DEFAULT_CATEGORIES = ['Bebidas','Abarrotes','Panes','Postres','Quesos','Cecinas','Helados','Hielo','Mascotas','Aseo'];
 
 export default function ProductForm({ initial, onSaved, onCancel }) {
   const [barcode, setBarcode] = useState(initial?.barcode || '');
@@ -14,6 +20,28 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
   const [stock, setStock] = useState(String(initial?.stock ?? ''));
   const [saving, setSaving] = useState(false);
   const [scanOpen, setScanOpen] = useState(false);
+
+  // DatePicker
+  const [showDate, setShowDate] = useState(false);
+  const dateObj = useMemo(() => {
+    if (!expiryDate) return new Date();
+    const d = new Date(expiryDate);
+    return isNaN(d.getTime()) ? new Date() : d;
+  }, [expiryDate]);
+
+  // Category selector
+  const [catOpen, setCatOpen] = useState(false);
+  const categories = DEFAULT_CATEGORIES;
+
+  const onDateChange = (_e, selectedDate) => {
+    setShowDate(false);
+    if (selectedDate) {
+      const yyyy = selectedDate.getFullYear();
+      const mm = String(selectedDate.getMonth() + 1).padStart(2, '0');
+      const dd = String(selectedDate.getDate()).padStart(2, '0');
+      setExpiryDate(`${yyyy}-${mm}-${dd}`);
+    }
+  };
 
   const save = async () => {
     if (!barcode) return Alert.alert('Error', 'El código de barras es obligatorio');
@@ -59,10 +87,36 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
 
         <TextInput style={styles.input} placeholder="Código de barras" value={barcode} onChangeText={setBarcode} autoCapitalize="none" />
         <TextInput style={styles.input} placeholder="Nombre" value={name} onChangeText={setName} />
-        <TextInput style={styles.input} placeholder="Categoría" value={category} onChangeText={setCategory} />
+
+        {/* Selector de categoría */}
+        <View style={{ flexDirection:'row', gap:8 }}>
+          <TextInput style={[styles.input, { flex:1 }]} placeholder="Categoría" value={category} onChangeText={setCategory} />
+          <Button title="Elegir" onPress={() => setCatOpen(true)} />
+        </View>
+
+        {/* Precios / stock */}
         <TextInput style={styles.input} placeholder="Precio de compra" value={purchasePrice} onChangeText={setPurchasePrice} keyboardType="numeric" />
         <TextInput style={styles.input} placeholder="Precio de venta" value={salePrice} onChangeText={setSalePrice} keyboardType="numeric" />
-        <TextInput style={styles.input} placeholder="Fecha de caducidad (YYYY-MM-DD)" value={expiryDate} onChangeText={setExpiryDate} />
+
+        {/* Fecha de caducidad con DatePicker */}
+        <View style={{ flexDirection:'row', gap:8, alignItems:'center' }}>
+          <TextInput
+            style={[styles.input, { flex:1 }]}
+            placeholder="Fecha de caducidad (YYYY-MM-DD)"
+            value={expiryDate}
+            onChangeText={setExpiryDate}
+          />
+          <Button title="Calendario" onPress={() => setShowDate(true)} />
+        </View>
+        {showDate && (
+          <DateTimePicker
+            value={dateObj}
+            mode="date"
+            display="default"
+            onChange={onDateChange}
+          />
+        )}
+
         <TextInput style={styles.input} placeholder="Stock" value={stock} onChangeText={setStock} keyboardType="numeric" />
 
         <View style={{ flexDirection: 'row', gap: 8, marginTop: 10 }}>
@@ -72,8 +126,23 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
         </View>
       </View>
 
+      {/* Modal escáner */}
       <Modal visible={scanOpen} animationType="fade" onRequestClose={() => setScanOpen(false)}>
         <ScannerScreen onClose={() => setScanOpen(false)} onScanned={(code) => { setBarcode(code); setScanOpen(false); }} />
+      </Modal>
+
+      {/* Modal categorías */}
+      <Modal visible={catOpen} animationType="slide" onRequestClose={() => setCatOpen(false)}>
+        <SafeAreaView style={{ flex:1, backgroundColor:'#fff', padding:16 }}>
+          <Text style={styles.title}>Selecciona una categoría</Text>
+          {categories.map(c => (
+            <TouchableOpacity key={c} style={styles.catItem} onPress={() => { setCategory(c); setCatOpen(false); }}>
+              <Text>{c}</Text>
+            </TouchableOpacity>
+          ))}
+          <View style={{ height:8 }} />
+          <Button title="Cerrar" onPress={() => setCatOpen(false)} />
+        </SafeAreaView>
       </Modal>
     </SafeAreaView>
   );
@@ -81,5 +150,6 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
 
 const styles = StyleSheet.create({
   title: { fontSize: 18, fontWeight: '700', marginBottom: 12 },
-  input: { borderWidth: 1, borderColor: '#ddd', borderRadius: 6, padding: 10, marginBottom: 8, backgroundColor: '#fff' }
+  input: { borderWidth: 1, borderColor: '#ddd', borderRadius: 6, padding: 10, marginBottom: 8, backgroundColor: '#fff' },
+  catItem: { padding:12, borderWidth:1, borderColor:'#eee', borderRadius:8, marginBottom:8, backgroundColor:'#fafafa' }
 });
