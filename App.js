@@ -1,9 +1,6 @@
 // App.js
 import React, { useEffect, useState } from 'react';
-import {
-  SafeAreaView, View, Text, FlatList, Button,
-  StyleSheet, Alert, Modal
-} from 'react-native';
+import { SafeAreaView, View, Text, FlatList, Button, StyleSheet, Alert, Modal } from 'react-native';
 import { initDB, listProducts, deleteProductByBarcode } from './src/db';
 import ProductForm from './src/screens/ProductForm';
 import SellScreen from './src/screens/SellScreen';
@@ -14,7 +11,7 @@ export default function App() {
   const [products, setProducts] = useState([]);
   const [editing, setEditing] = useState(null);
   const [openForm, setOpenForm] = useState(false);
-  const [openSell, setOpenSell] = useState(false);
+  const [openSales, setOpenSales] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -23,8 +20,7 @@ export default function App() {
         await refresh();
         setReady(true);
       } catch (e) {
-        console.error('app_boot:', e);
-        Alert.alert('Error', 'Fallo al iniciar la base de datos');
+        Alert.alert('Error', 'Fallo al inicializar la base de datos');
       }
     })();
   }, []);
@@ -33,14 +29,12 @@ export default function App() {
     try {
       const rows = await listProducts();
       setProducts(rows);
-    } catch (e) {
-      console.error('products_refresh:', e);
+    } catch {
       Alert.alert('Error', 'No se pudo cargar el listado');
     }
   };
 
   const onCreate = () => { setEditing(null); setOpenForm(true); };
-
   const onEdit = (item) => {
     const mapped = {
       barcode: item.barcode,
@@ -55,48 +49,37 @@ export default function App() {
     setOpenForm(true);
   };
 
-  const onDelete = async (item) => {
-    Alert.alert('Confirmar', `¿Eliminar producto ${item.name || item.barcode}?`, [
+  const onDelete = (item) => {
+    Alert.alert('Confirmar', `¿Eliminar producto ${item.barcode}?`, [
       { text: 'Cancelar', style: 'cancel' },
       {
-        text: 'Eliminar', style: 'destructive', onPress: async () => {
-          try {
-            await deleteProductByBarcode(item.barcode);
-            await refresh();
-          } catch (e) {
-            console.error('product_delete:', e);
-            Alert.alert('Error', 'No se pudo eliminar');
-          }
+        text: 'Eliminar', style: 'destructive',
+        onPress: async () => {
+          try { await deleteProductByBarcode(item.barcode); await refresh(); }
+          catch { Alert.alert('Error', 'No se pudo eliminar'); }
         }
       }
     ]);
   };
 
-  const onSaved = async () => {
-    setOpenForm(false);
-    await refresh();
-  };
-
   if (!ready) {
     return (
-      <SafeAreaView style={styles.center}>
-        <Text>Inicializando base de datos…</Text>
-      </SafeAreaView>
+      <SafeAreaView style={styles.center}><Text>Inicializando base de datos...</Text></SafeAreaView>
     );
   }
 
   return (
     <SafeAreaView style={styles.container}>
-      <Text style={styles.title}>📦 Inventario OlivoMarket (SQLite)</Text>
+      <Text style={styles.title}>Inventario OlivoMarket (SQLite)</Text>
 
       <View style={{ marginBottom: 10 }}>
         <Button title="➕ Nuevo producto" onPress={onCreate} />
         <View style={{ height: 8 }} />
-        <Button title="💰 Vender" onPress={() => setOpenSell(true)} />
+        <Button title="🧾 Ir a Ventas" onPress={() => setOpenSales(true)} />
         <View style={{ height: 8 }} />
-        <Button title="📊 Exportar CSV" onPress={exportCSVFile} />
+        <Button title=" Exportar CSV" onPress={exportCSVFile} />
         <View style={{ height: 8 }} />
-        <Button title="🧰 Exportar JSON" onPress={exportJSONFile} />
+        <Button title=" Exportar JSON" onPress={exportJSONFile} />
       </View>
 
       <Text style={styles.subtitle}>Productos ({products.length})</Text>
@@ -105,8 +88,7 @@ export default function App() {
         keyExtractor={(item) => String(item.id)}
         renderItem={({ item }) => (
           <View style={styles.card}>
-            <Text style={styles.cardTitle}>{item.name || '(Sin nombre)'}</Text>
-            <Text>Categoría: {item.category || '(Sin categoría)'}</Text>
+            <Text style={styles.cardTitle}>{item.name || '(Sin nombre)'} · {item.category || '(Sin categoría)'}</Text>
             <Text>Código: {item.barcode}</Text>
             <Text>Compra: ${item.purchase_price ?? 0} | Venta: ${item.sale_price ?? 0}</Text>
             <Text>Vence: {item.expiry_date || '—'} | Stock: {item.stock ?? 0}</Text>
@@ -118,24 +100,21 @@ export default function App() {
         )}
       />
 
-      {/* Formulario de producto */}
+      {/* Formulario */}
       <Modal visible={openForm} animationType="slide" onRequestClose={() => setOpenForm(false)}>
         <SafeAreaView style={{ flex: 1 }}>
           <ProductForm
             initial={editing}
-            onSaved={onSaved}
+            onSaved={async () => { setOpenForm(false); await refresh(); }}
             onCancel={() => setOpenForm(false)}
           />
         </SafeAreaView>
       </Modal>
 
-      {/* Pantalla de ventas */}
-      <Modal visible={openSell} animationType="slide" onRequestClose={() => setOpenSell(false)}>
-        <SafeAreaView style={{ flex:1 }}>
-          <SellScreen
-            onClose={() => setOpenSell(false)}
-            onSold={async () => { setOpenSell(false); await refresh(); }}
-          />
+      {/* Ventas */}
+      <Modal visible={openSales} animationType="slide" onRequestClose={() => setOpenSales(false)}>
+        <SafeAreaView style={{ flex: 1 }}>
+          <SellScreen onClose={() => setOpenSales(false)} onSold={refresh} />
         </SafeAreaView>
       </Modal>
     </SafeAreaView>
