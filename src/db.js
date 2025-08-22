@@ -3,248 +3,189 @@ import * as SQLite from 'expo-sqlite';
 
 let db;
 
-export async function initDB() {
-  db = SQLite.openDatabase('olivomarket.db');
+// Abre una única instancia
+function open() {
+  if (!db) db = SQLite.openDatabase('olivomarket.db');
+  return db;
+}
 
+// Inicializa todas las tablas requeridas
+export function initDB() {
   return new Promise((resolve, reject) => {
-    db.transaction(tx => {
-      // ----- Tabla de productos -----
-      tx.executeSql(
-        `CREATE TABLE IF NOT EXISTS products (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          barcode TEXT UNIQUE,
-          name TEXT,
-          category TEXT,
-          purchase_price REAL,
-          sale_price REAL,
-          expiry_date TEXT,
-          stock INTEGER,
-          updated_at INTEGER DEFAULT 0
-        );`,
-        [],
-        () => {},
-        (_, err) => {
-          console.error('initDB:create products:', err);
-          reject(err);
-          return false;
-        }
-      );
+    open().transaction(
+      (tx) => {
+        // ----- Productos -----
+        tx.executeSql(`
+          CREATE TABLE IF NOT EXISTS products (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            barcode TEXT UNIQUE NOT NULL,
+            name TEXT,
+            category TEXT,
+            purchase_price REAL DEFAULT 0,
+            sale_price REAL DEFAULT 0,
+            expiry_date TEXT,
+            stock INTEGER DEFAULT 0,
+            updated_at INTEGER
+          );
+        `);
+        tx.executeSql(`CREATE INDEX IF NOT EXISTS idx_products_barcode ON products(barcode);`);
 
-      // Migraciones defensivas
-      // 1) Asegurar columna 'name'
-      tx.executeSql(
-        `PRAGMA table_info(products);`,
-        [],
-        (_, res) => {
-          let hasName = false;
-          let hasUpdatedAt = false;
-          for (let i = 0; i < res.rows.length; i++) {
-            const col = res.rows.item(i);
-            const n = (col.name || '').toLowerCase();
-            if (n === 'name') hasName = true;
-            if (n === 'updated_at') hasUpdatedAt = true;
-          }
-          if (!hasName) {
-            tx.executeSql(
-              `ALTER TABLE products ADD COLUMN name TEXT;`,
-              [],
-              () => {},
-              (_, err2) => { console.warn('migrate add name failed:', err2); return false; }
-            );
-          }
-          if (!hasUpdatedAt) {
-            tx.executeSql(
-              `ALTER TABLE products ADD COLUMN updated_at INTEGER DEFAULT 0;`,
-              [],
-              () => {},
-              (_, err2) => { console.warn('migrate add updated_at failed:', err2); return false; }
-            );
-          }
-        },
-        () => false
-      );
+        // ----- Categorías (semillas mínimas) -----
+        tx.executeSql(`
+          CREATE TABLE IF NOT EXISTS categories (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT UNIQUE NOT NULL
+          );
+        `);
+        const defaults = ['Bebidas','Abarrotes','Panes','Postres','Quesos','Cecinas','Helados','Hielo','Mascotas','Aseo'];
+        defaults.forEach((cat) => {
+          tx.executeSql(`INSERT OR IGNORE INTO categories(name) VALUES (?);`, [cat]);
+        });
 
-      // ----- Tablas de ventas -----
-      tx.executeSql(
-        `CREATE TABLE IF NOT EXISTS sales (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          ts INTEGER,
-          subtotal REAL,
-          discount REAL,
-          tax REAL,
-          total REAL,
-          payment_method TEXT,
-          amount_paid REAL,
-          change REAL,
-          note TEXT
-        );`
-      );
+        // ----- Ventas -----
+        tx.executeSql(`
+          CREATE TABLE IF NOT EXISTS sales (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts INTEGER NOT NULL,
+            total REAL NOT NULL,
+            payment_method TEXT,
+            cash_received REAL,
+            change_given REAL,
+            notes TEXT
+          );
+        `);
+        tx.executeSql(`
+          CREATE TABLE IF NOT EXISTS sale_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            sale_id INTEGER NOT NULL,
+            barcode TEXT NOT NULL,
+            name TEXT,
+            qty INTEGER NOT NULL,
+            unit_price REAL NOT NULL,
+            subtotal REAL NOT NULL,
+            FOREIGN KEY (sale_id) REFERENCES sales(id) ON DELETE CASCADE
+          );
+        `);
 
-      tx.executeSql(
-        `CREATE TABLE IF NOT EXISTS sale_items (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          sale_id INTEGER,
-          barcode TEXT,
-          name TEXT,
-          unit_price REAL,
-          qty INTEGER,
-          line_total REAL,
-          FOREIGN KEY(sale_id) REFERENCES sales(id) ON DELETE CASCADE
-        );`
-      );
-    },
-    (err) => { console.error('initDB:tx error:', err); reject(err); },
-    () => resolve());
+        // Opcional: soporte para TemplateEditor
+        tx.executeSql(`
+          CREATE TABLE IF NOT EXISTS templates (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT UNIQUE NOT NULL
+          );
+        `);
+        tx.executeSql(`
+          CREATE TABLE IF NOT EXISTS template_fields (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            template_id INTEGER NOT NULL,
+            label TEXT NOT NULL,
+            FOREIGN KEY (template_id) REFERENCES templates(id) ON DELETE CASCADE
+          );
+        `);
+      },
+      reject,
+      () => resolve(true)
+    );
   });
 }
 
-export async function insertOrUpdateProduct(p) {
+// Utilidad
+function rows(res) {
+  const out = [];
+  for (let i = 0; i < res.rows.length; i++) out.push(res.rows.item(i));
+  return out;
+}
+
+// -------- Productos --------
+export function insertOrUpdateProduct(p) {
   const now = Date.now();
+  const payload = {
+    barcode: String(p.barcode || '').trim(),
+    name: p.name ?? null,
+    category: p.category ?? null,
+    purchase_price: Number(p.purchasePrice ?? p.purchase_price ?? 0),
+    sale_price: Number(p.salePrice ?? p.sale_price ?? 0),
+    expiry_date: p.expiryDate ?? p.expiry_date ?? null,
+    stock: Number(p.stock ?? 0)
+  };
+  if (!payload.barcode) return Promise.reject(new Error('barcode requerido'));
+
   return new Promise((resolve, reject) => {
-    db.transaction(tx => {
-      tx.executeSql(
-        `INSERT INTO products (barcode, name, category, purchase_price, sale_price, expiry_date, stock, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(barcode) DO UPDATE SET
-           name=excluded.name,
-           category=excluded.category,
-           purchase_price=excluded.purchase_price,
-           sale_price=excluded.sale_price,
-           expiry_date=excluded.expiry_date,
-           stock=excluded.stock,
-           updated_at=excluded.updated_at;`,
-        [
-          String(p.barcode),
-          p.name ?? null,
-          p.category ?? null,
-          parseFloat(p.purchasePrice) || 0,
-          parseFloat(p.salePrice) || 0,
-          p.expiryDate ?? null,
-          parseInt(p.stock, 10) || 0,
-          now
-        ],
-        (_, result) => resolve(result),
-        (_, err) => {
-          console.error('insertOrUpdateProduct:', err);
-          reject(err);
-          return false;
-        }
-      );
-    });
+    open().transaction(
+      (tx) => {
+        tx.executeSql(
+          `INSERT INTO products (barcode, name, category, purchase_price, sale_price, expiry_date, stock, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(barcode) DO UPDATE SET
+             name=excluded.name,
+             category=excluded.category,
+             purchase_price=excluded.purchase_price,
+             sale_price=excluded.sale_price,
+             expiry_date=excluded.expiry_date,
+             stock=excluded.stock,
+             updated_at=excluded.updated_at;`,
+          [
+            payload.barcode,
+            payload.name,
+            payload.category,
+            payload.purchase_price,
+            payload.sale_price,
+            payload.expiry_date,
+            payload.stock,
+            now
+          ]
+        );
+      },
+      reject,
+      () => resolve(true)
+    );
   });
 }
 
-export async function listProducts() {
+export function getProductByBarcode(barcode) {
   return new Promise((resolve, reject) => {
-    db.transaction(tx => {
+    open().transaction((tx) => {
       tx.executeSql(
-        'SELECT * FROM products ORDER BY id DESC;',
+        `SELECT * FROM products WHERE barcode = ? LIMIT 1;`,
+        [String(barcode)],
+        (_,_res) => resolve(_res.rows.length ? _res.rows.item(0) : null)
+      );
+    }, reject);
+  });
+}
+
+export function listProducts() {
+  return new Promise((resolve, reject) => {
+    open().transaction((tx) => {
+      tx.executeSql(
+        `SELECT * FROM products ORDER BY updated_at DESC, name ASC, id DESC;`,
         [],
-        (_, { rows }) => resolve(rows._array),
-        (_, err) => {
-          console.error('listProducts:', err);
-          reject(err);
-          return false;
-        }
+        (_,_res) => resolve(rows(_res))
       );
-    });
+    }, reject);
   });
 }
 
-export async function deleteProductByBarcode(barcode) {
+export function deleteProductByBarcode(barcode) {
   return new Promise((resolve, reject) => {
-    db.transaction(tx => {
-      tx.executeSql(
-        'DELETE FROM products WHERE barcode = ?;',
-        [String(barcode)],
-        (_, result) => resolve(result),
-        (_, err) => {
-          console.error('deleteProductByBarcode:', err);
-          reject(err);
-          return false;
-        }
-      );
-    });
+    open().transaction((tx) => {
+      tx.executeSql(`DELETE FROM products WHERE barcode = ?;`, [String(barcode)]);
+    }, reject, () => resolve(true));
   });
 }
 
-export async function getProductByBarcode(barcode) {
+export function clearAllProducts() {
   return new Promise((resolve, reject) => {
-    db.transaction(tx => {
-      tx.executeSql(
-        'SELECT * FROM products WHERE barcode = ? LIMIT 1;',
-        [String(barcode)],
-        (_, { rows }) => resolve(rows.length ? rows._array[0] : null),
-        (_, err) => { console.error('getProductByBarcode:', err); reject(err); return false; }
-      );
-    });
+    open().transaction((tx) => {
+      tx.executeSql(`DELETE FROM products;`);
+    }, reject, () => resolve(true));
   });
 }
 
-/**
- * Registra una venta y descuenta stock.
- * cart = [{ barcode, name, unit_price, qty }]
- * opts = { paymentMethod, amountPaid, discount(=0), tax(=0), note }
- */
-export async function recordSale(cart, opts = {}) {
-  const ts = Date.now();
-  const discount = Number(opts.discount || 0);
-  const tax = Number(opts.tax || 0);
-
-  // Calcular totales
-  const subtotal = cart.reduce((acc, it) => acc + (Number(it.unit_price) || 0) * (Number(it.qty) || 0), 0);
-  const total = Math.max(0, subtotal - discount + tax);
-  const paymentMethod = opts.paymentMethod || 'cash';
-  const amountPaid = Number(opts.amountPaid || total);
-  const change = Math.max(0, amountPaid - total);
-  const note = opts.note || null;
-
+// Export ordenado (para CSV/JSON)
+export function exportAllProductsOrdered() {
   return new Promise((resolve, reject) => {
-    db.transaction(tx => {
-      // 1) Insert sale header
-      tx.executeSql(
-        `INSERT INTO sales (ts, subtotal, discount, tax, total, payment_method, amount_paid, change, note)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);`,
-        [ts, subtotal, discount, tax, total, paymentMethod, amountPaid, change, note],
-        (_, res) => {
-          const saleId = res.insertId;
-
-          // 2) Insert items + update stock
-          for (const it of cart) {
-            const qty = Number(it.qty) || 0;
-            const price = Number(it.unit_price) || 0;
-            const lineTotal = qty * price;
-
-            tx.executeSql(
-              `INSERT INTO sale_items (sale_id, barcode, name, unit_price, qty, line_total)
-               VALUES (?, ?, ?, ?, ?, ?);`,
-              [saleId, String(it.barcode), it.name || '', price, qty, lineTotal]
-            );
-
-            // Descontar stock y actualizar updated_at
-            tx.executeSql(
-              `UPDATE products
-               SET stock = MAX(0, IFNULL(stock,0) - ?),
-                   updated_at = ?
-               WHERE barcode = ?;`,
-              [qty, ts, String(it.barcode)]
-            );
-          }
-        },
-        (_, err) => { console.error('recordSale:insert sale', err); reject(err); return false; }
-      );
-    },
-    (err) => { console.error('recordSale:tx error', err); reject(err); },
-    () => resolve({ ok: true, ts, subtotal, discount, tax, total, paymentMethod, amountPaid, change }));
-  });
-}
-
-/**
- * Export para archivos (alias que export.js espera)
- */
-export async function exportAllProductsOrdered() {
-  return new Promise((resolve, reject) => {
-    db.transaction(tx => {
+    open().transaction((tx) => {
       tx.executeSql(
         `SELECT
            barcode,
@@ -258,13 +199,77 @@ export async function exportAllProductsOrdered() {
          FROM products
          ORDER BY name ASC, id DESC;`,
         [],
-        (_, { rows }) => resolve(rows._array),
-        (_, err) => {
-          console.error('exportAllProductsOrdered:', err);
-          reject(err);
-          return false;
-        }
+        (_,_res) => resolve(rows(_res)),
+        (_,_err) => { console.error('exportAllProductsOrdered:', _err); reject(_err); return false; }
       );
     });
+  });
+}
+
+// -------- Categorías --------
+export function listCategories() {
+  return new Promise((resolve, reject) => {
+    open().transaction((tx) => {
+      tx.executeSql(`SELECT * FROM categories ORDER BY name ASC;`, [], (_,_res) => resolve(rows(_res)));
+    }, reject);
+  });
+}
+
+export function addCategory(name) {
+  return new Promise((resolve, reject) => {
+    open().transaction((tx) => {
+      tx.executeSql(`INSERT OR IGNORE INTO categories(name) VALUES (?);`, [name]);
+      tx.executeSql(`SELECT * FROM categories WHERE name = ?;`, [name], (_,_res) => {
+        resolve(_res.rows.length ? _res.rows.item(0) : { id: 0, name });
+      });
+    }, reject);
+  });
+}
+
+// -------- Ventas --------
+export function recordSale(sale) {
+  const items = Array.isArray(sale.items) ? sale.items : [];
+  const total = items.reduce((acc, it) => acc + Number(it.qty || 0) * Number(it.unitPrice || 0), 0);
+  const ts = Date.now();
+  const payment = sale.paymentMethod || 'efectivo';
+  const cashReceived = Number(sale.cashReceived || 0);
+  const change = Math.max(0, cashReceived - total);
+
+  return new Promise((resolve, reject) => {
+    open().transaction(
+      (tx) => {
+        tx.executeSql(
+          `INSERT INTO sales (ts, total, payment_method, cash_received, change_given, notes)
+           VALUES (?, ?, ?, ?, ?, ?);`,
+          [ts, total, payment, cashReceived, change, sale.notes || null],
+          (_insert, res) => {
+            const saleId = res.insertId;
+
+            // Items + descuento stock
+            items.forEach((it) => {
+              const qty = Number(it.qty || 0);
+              const unit = Number(it.unitPrice || 0);
+              const subtotal = qty * unit;
+
+              tx.executeSql(
+                `INSERT INTO sale_items (sale_id, barcode, name, qty, unit_price, subtotal)
+                 VALUES (?, ?, ?, ?, ?, ?);`,
+                [saleId, String(it.barcode), it.name || null, qty, unit, subtotal]
+              );
+
+              tx.executeSql(
+                `UPDATE products
+                   SET stock = CASE WHEN IFNULL(stock,0) - ? < 0 THEN 0 ELSE IFNULL(stock,0) - ? END,
+                       updated_at = ?
+                 WHERE barcode = ?;`,
+                [qty, qty, ts, String(it.barcode)]
+              );
+            });
+          }
+        );
+      },
+      reject,
+      () => resolve({ ok: true, ts })
+    );
   });
 }
