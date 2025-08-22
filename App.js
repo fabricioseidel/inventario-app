@@ -1,36 +1,29 @@
 // App.js
 import React, { useEffect, useState } from 'react';
-import { SafeAreaView, View, Text, FlatList, Button, StyleSheet, Alert, Modal } from 'react-native';
+import {
+  SafeAreaView, View, Text, FlatList, Button,
+  StyleSheet, Alert, Modal
+} from 'react-native';
 import { initDB, listProducts, deleteProductByBarcode } from './src/db';
-import { useErrorLogs, clearErrors, logError, installGlobalErrorCapture } from './src/errorLogger';
 import ProductForm from './src/screens/ProductForm';
 import { exportCSVFile, exportJSONFile } from './src/export';
 
 export default function App() {
   const [ready, setReady] = useState(false);
   const [products, setProducts] = useState([]);
-  const [editing, setEditing] = useState(null); // producto para editar o null
+  const [editing, setEditing] = useState(null);
   const [openForm, setOpenForm] = useState(false);
-  const [errorPanel, setErrorPanel] = useState(false);
-  const errors = useErrorLogs();
 
   useEffect(() => {
-    installGlobalErrorCapture();
     (async () => {
       try {
-        try {
-          await initDB();
-        } catch (e) {
-          logError('db_init', e);
-          Alert.alert('DB', 'Error inicializando la base de datos');
-        }
-        try {
-          await refresh();
-        } catch (e) {
-          logError('products_load', e);
-        }
+        await initDB();
+        await refresh();
         setReady(true);
-      } catch (e) { logError('app_boot', e); Alert.alert('Error', 'Fallo general al iniciar'); }
+      } catch (e) {
+        console.error('app_boot:', e);
+        Alert.alert('Error', 'Fallo al iniciar la base de datos');
+      }
     })();
   }, []);
 
@@ -39,16 +32,18 @@ export default function App() {
       const rows = await listProducts();
       setProducts(rows);
     } catch (e) {
-      logError('products_refresh', e);
+      console.error('products_refresh:', e);
       Alert.alert('Error', 'No se pudo cargar el listado');
     }
   };
 
   const onCreate = () => { setEditing(null); setOpenForm(true); };
+
   const onEdit = (item) => {
-    // Mapear columnas de SQLite a props del formulario
+    // Mapea columnas de SQLite -> props del formulario
     const mapped = {
       barcode: item.barcode,
+      name: item.name || '',
       category: item.category || '',
       purchasePrice: String(item.purchase_price ?? ''),
       salePrice: String(item.sale_price ?? ''),
@@ -60,13 +55,17 @@ export default function App() {
   };
 
   const onDelete = async (item) => {
-    Alert.alert('Confirmar', `¿Eliminar producto ${item.barcode}?`, [
+    Alert.alert('Confirmar', `¿Eliminar producto ${item.name || item.barcode}?`, [
       { text: 'Cancelar', style: 'cancel' },
-      { text: 'Eliminar', style: 'destructive', onPress: async () => {
+      {
+        text: 'Eliminar', style: 'destructive', onPress: async () => {
           try {
             await deleteProductByBarcode(item.barcode);
             await refresh();
-          } catch (e) { logError('product_delete', e); Alert.alert('Error', 'No se pudo eliminar'); }
+          } catch (e) {
+            console.error('product_delete:', e);
+            Alert.alert('Error', 'No se pudo eliminar');
+          }
         }
       }
     ]);
@@ -74,16 +73,16 @@ export default function App() {
 
   const onSaved = async () => {
     setOpenForm(false);
-    await refresh();
+    await refresh(); // ← refresca lista altiro
   };
 
   if (!ready) {
     return (
       <SafeAreaView style={styles.center}>
-        <Text>Inicializando base de datos...</Text>
+        <Text>Inicializando base de datos…</Text>
       </SafeAreaView>
     );
-  }
+    }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -95,8 +94,6 @@ export default function App() {
         <Button title="📊 Exportar CSV" onPress={exportCSVFile} />
         <View style={{ height: 8 }} />
         <Button title="🧰 Exportar JSON" onPress={exportJSONFile} />
-        <View style={{ height: 8 }} />
-        <Button title={`⚠️ Errores (${errors.length})`} color={errors.length ? '#c0392b' : '#666'} onPress={() => setErrorPanel(true)} />
       </View>
 
       <Text style={styles.subtitle}>Productos ({products.length})</Text>
@@ -105,7 +102,8 @@ export default function App() {
         keyExtractor={(item) => String(item.id)}
         renderItem={({ item }) => (
           <View style={styles.card}>
-            <Text style={styles.cardTitle}>{item.category || '(Sin categoría)'}</Text>
+            <Text style={styles.cardTitle}>{item.name || '(Sin nombre)'}</Text>
+            <Text>Categoría: {item.category || '(Sin categoría)'}</Text>
             <Text>Código: {item.barcode}</Text>
             <Text>Compra: ${item.purchase_price ?? 0} | Venta: ${item.sale_price ?? 0}</Text>
             <Text>Vence: {item.expiry_date || '—'} | Stock: {item.stock ?? 0}</Text>
@@ -124,29 +122,6 @@ export default function App() {
             onSaved={onSaved}
             onCancel={() => setOpenForm(false)}
           />
-        </SafeAreaView>
-      </Modal>
-      <Modal visible={errorPanel} animationType="fade" onRequestClose={() => setErrorPanel(false)}>
-        <SafeAreaView style={{ flex:1, backgroundColor:'#111' }}>
-          <View style={{ flexDirection:'row', justifyContent:'space-between', padding:12 }}>
-            <Text style={{ color:'#fff', fontWeight:'700', fontSize:16 }}>Errores ({errors.length})</Text>
-            <Button title="Cerrar" onPress={() => setErrorPanel(false)} />
-          </View>
-          <FlatList
-            data={errors}
-            keyExtractor={i=>i.id}
-            style={{ flex:1, paddingHorizontal:12 }}
-            renderItem={({ item }) => (
-              <View style={{ backgroundColor:'#222', padding:10, borderRadius:8, marginBottom:10 }}>
-                <Text style={{ color:'#0af', fontWeight:'600' }}>{item.ts} · {item.context}</Text>
-                <Text style={{ color:'#fff' }}>{item.message}</Text>
-                {!!item.stack && <Text style={{ color:'#888', fontSize:10, marginTop:4 }}>{item.stack.split('\n')[0]}</Text>}
-              </View>
-            )}
-          />
-          <View style={{ padding:12 }}>
-            {errors.length > 0 && <Button title="Limpiar errores" color="#e67e22" onPress={() => clearErrors()} />}
-          </View>
         </SafeAreaView>
       </Modal>
     </SafeAreaView>
