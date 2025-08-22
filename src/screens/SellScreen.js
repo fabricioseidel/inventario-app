@@ -32,7 +32,6 @@ export default function SellScreen({ onClose, onSold }) {
         copy[idx] = { ...copy[idx], qty: Number(copy[idx].qty) + 1 };
         return copy;
       }
-      // Mapea al formato que espera tu recordSale (unit_price)
       return [...prev, {
         barcode: p.barcode,
         name: p.name || p.category || '(Sin nombre)',
@@ -76,7 +75,7 @@ export default function SellScreen({ onClose, onSold }) {
   const finalizeSale = async () => {
     if (cart.length === 0) return Alert.alert('Atención', 'El carrito está vacío.');
 
-    // Aviso de stock (no bloquea, solo advierte)
+    // Aviso de stock (no bloquea)
     const over = cart.filter(i => typeof i.stock === 'number' && i.stock < i.qty);
     if (over.length) {
       const list = over.map(i => `${i.name} (stock ${i.stock}, qty ${i.qty})`).join('\n');
@@ -99,7 +98,7 @@ export default function SellScreen({ onClose, onSold }) {
 
     try {
       setSaving(true);
-      // Tu firma actual: recordSale(cart, opts)
+      // Tu firma actual en db.js: recordSale(cart, { paymentMethod, amountPaid, note, ... })
       await recordSale(cart, {
         paymentMethod,
         amountPaid: Number(amountPaid || 0),
@@ -117,7 +116,7 @@ export default function SellScreen({ onClose, onSold }) {
       onClose && onClose(true);
     } catch (e) {
       console.warn('recordSale error', e);
-      Alert.alert('Error', 'No se pudo registrar la venta.');
+      Alert.alert('Error', 'No se pudo registrar la venta. Revisa la base de datos o la consola.');
     } finally {
       setSaving(false);
     }
@@ -139,7 +138,8 @@ export default function SellScreen({ onClose, onSold }) {
 
   return (
     <SafeAreaView style={{ flex:1, backgroundColor:'#fff' }}>
-      <View style={{ padding:16 }}>
+      {/* 🔧 IMPORTANTE: este contenedor ahora tiene flex:1, así el FlatList se ve */}
+      <View style={{ flex:1, padding:16 }}>
         <Text style={styles.title}>Caja / Ventas</Text>
 
         <View style={{ flexDirection:'row', gap:8, marginBottom:12 }}>
