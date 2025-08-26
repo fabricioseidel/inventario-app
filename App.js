@@ -6,32 +6,28 @@ import {
 } from 'react-native';
 
 import { initDB, listProducts, deleteProductByBarcode } from './src/db';
-
-// Pantallas
 import ProductForm from './src/screens/ProductForm';
 import SellScreen from './src/screens/SellScreen';
 import SalesHistoryScreen from './src/screens/SalesHistoryScreen';
 import SalesDashboardScreen from './src/screens/SalesDashboardScreen';
 import QuickScanScreen from './src/screens/QuickScanScreen';
-
-// Utilidades de export
 import { exportCSVFile, exportJSONFile } from './src/export';
 
-// UI
 import Header from './src/ui/Header';
 import TopTabs from './src/ui/TopTabs';
 import FAB from './src/ui/FAB';
 import { theme } from './src/ui/Theme';
 
+// Sync cloud
+import { syncNow } from './src/sync';
+
 export default function App() {
   const [ready, setReady] = useState(false);
-  const [tab, setTab] = useState('inventory'); // 'inventory' | 'sales' | 'reports'
+  const [tab, setTab] = useState('inventory');
 
-  // inventario
   const [products, setProducts] = useState([]);
   const [search, setSearch] = useState('');
 
-  // modales
   const [editing, setEditing] = useState(null);
   const [openForm, setOpenForm] = useState(false);
   const [openHistory, setOpenHistory] = useState(false);
@@ -44,10 +40,19 @@ export default function App() {
         await initDB();
         await refresh();
         setReady(true);
+
+        // Auto-sync al iniciar (si hay internet)
+        try { await syncNow(); await refresh(); } catch {}
       } catch {
         Alert.alert('Error', 'Fallo al inicializar la base de datos');
       }
     })();
+
+    // Auto-sync cada 5 minutos (opcional)
+    const id = setInterval(async () => {
+      try { await syncNow(); await refresh(); } catch {}
+    }, 5 * 60 * 1000);
+    return () => clearInterval(id);
   }, []);
 
   const refresh = async () => {
@@ -59,7 +64,6 @@ export default function App() {
     }
   };
 
-  // Búsqueda
   const norm = (s) =>
     String(s || '')
       .toLowerCase()
@@ -102,6 +106,16 @@ export default function App() {
     ]);
   };
 
+  const manualSync = async () => {
+    try {
+      await syncNow();
+      await refresh();
+      Alert.alert('Sync', 'Sincronización completa.');
+    } catch {
+      Alert.alert('Sync', 'Error sincronizando. Revisa internet/clave y vuelve a intentar.');
+    }
+  };
+
   if (!ready) {
     return (
       <SafeAreaView style={styles.center}>
@@ -122,7 +136,6 @@ export default function App() {
         onChange={setTab}
       />
 
-      {/* INVENTARIO */}
       {tab === 'inventory' && (
         <View style={styles.content}>
           <View style={styles.searchRow}>
@@ -147,6 +160,9 @@ export default function App() {
             </TouchableOpacity>
             <TouchableOpacity style={styles.secondaryBtn} onPress={exportJSONFile}>
               <Text style={styles.secondaryBtnText}>Exportar JSON</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.secondaryBtn, { borderColor: '#111' }]} onPress={manualSync}>
+              <Text style={[styles.secondaryBtnText, { fontWeight: '800' }]}>🔄 Sync</Text>
             </TouchableOpacity>
           </View>
 
@@ -186,14 +202,12 @@ export default function App() {
         </View>
       )}
 
-      {/* VENTAS */}
       {tab === 'sales' && (
         <View style={styles.content}>
-          <SellScreen onClose={() => {}} onSold={refresh} />
+          <SellScreen onClose={() => {}} onSold={async ()=>{ await refresh(); try{ await syncNow(); } catch{} }} />
         </View>
       )}
 
-      {/* REPORTES */}
       {tab === 'reports' && (
         <View style={styles.content}>
           <View style={styles.reportGrid}>
