@@ -1,16 +1,13 @@
 // src/screens/SalesHistoryScreen.js
 import React, { useEffect, useMemo, useState } from 'react';
-import {
-  View, Text, Button, FlatList, Modal, SafeAreaView,
-  TouchableOpacity, StyleSheet, ActivityIndicator, Alert
-} from 'react-native';
+import { View, Text, Button, FlatList, Modal, SafeAreaView, TouchableOpacity, StyleSheet, ActivityIndicator, Alert } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import { getSaleWithItems, listSalesBetween, exportSalesCSV, voidSale } from '../db';
+import { theme } from '../ui/Theme';
 
 const PMETHODS = ['efectivo','debito','credito','transferencia'];
-
 function startOfDay(d){ const x=new Date(d); x.setHours(0,0,0,0); return x; }
 function endOfDay(d){ const x=new Date(d); x.setHours(23,59,59,999); return x; }
 function addDays(d,n){ const x=new Date(d); x.setDate(x.getDate()+n); return x; }
@@ -18,19 +15,17 @@ function addMonths(d,n){ const x=new Date(d); x.setMonth(x.getMonth()+n); return
 function fmt(ts){ const d=new Date(ts); const dd=String(d.getDate()).padStart(2,'0'); const mm=String(d.getMonth()+1).padStart(2,'0'); const hh=String(d.getHours()).padStart(2,'0'); const mi=String(d.getMinutes()).padStart(2,'0'); return `${dd}/${mm} ${hh}:${mi}`; }
 
 export default function SalesHistoryScreen({ onClose }) {
-  const [rangeType, setRangeType] = useState('today'); // today|week|month|custom
+  const [rangeType, setRangeType] = useState('today');
   const [dStart, setDStart] = useState(startOfDay(new Date()));
   const [dEnd, setDEnd] = useState(endOfDay(new Date()));
   const [pickStart, setPickStart] = useState(false);
   const [pickEnd, setPickEnd] = useState(false);
 
   const [loading, setLoading] = useState(false);
-  const [sales, setSales] = useState([]);      // todas en rango (no anuladas)
-  const [detail, setDetail] = useState(null);  // { sale, items }
+  const [sales, setSales] = useState([]);
+  const [detail, setDetail] = useState(null);
   const [detailOpen, setDetailOpen] = useState(false);
-
-  // filtros por método (selección múltiple)
-  const [methods, setMethods] = useState(new Set()); // vacío = todos
+  const [methods, setMethods] = useState(new Set());
 
   useEffect(()=> {
     const today=new Date();
@@ -114,7 +109,6 @@ export default function SalesHistoryScreen({ onClose }) {
           setLoading(true);
           await voidSale(detail.sale.id);
           setDetailOpen(false);
-          // recargar
           const rows = await listSalesBetween(dStart.getTime(), dEnd.getTime());
           setSales(rows);
           Alert.alert('Listo','Venta anulada y stock repuesto.');
@@ -136,9 +130,7 @@ export default function SalesHistoryScreen({ onClose }) {
 
   return (
     <SafeAreaView style={{ flex:1, backgroundColor:'#fff' }}>
-      <View style={{ padding:16, flex:1 }}>
-        <Text style={styles.title}>Historial y Reportes</Text>
-
+      <View style={{ paddingHorizontal:16, paddingTop:10, flex:1 }}>
         {/* Filtros rápidos */}
         <View style={styles.rowWrap}>
           {['today','week','month','custom'].map(k=>(
@@ -192,13 +184,15 @@ export default function SalesHistoryScreen({ onClose }) {
             renderItem={renderSale}
             ListEmptyComponent={<Text style={{ color:'#888' }}>No hay ventas en este rango.</Text>}
             style={{ flex:1 }}
+            contentContainerStyle={{ paddingBottom: 10 }}
           />
         )}
 
         {/* Acciones */}
-        <View style={{ flexDirection:'row', gap:8, marginTop:8 }}>
-          <Button title="Exportar CSV" onPress={doExportCSV} />
-          <Button title="Cerrar" color="#666" onPress={onClose} />
+        <View style={{ flexDirection:'row', gap:8, marginTop:8, marginBottom: 12 }}>
+          <View style={{ flex:1 }}><Button title="Exportar CSV" onPress={doExportCSV} /></View>
+          <View style={{ width:8 }} />
+          <View style={{ flex:1 }}><Button title="Cerrar" color="#666" onPress={onClose} /></View>
         </View>
       </View>
 
@@ -226,7 +220,7 @@ export default function SalesHistoryScreen({ onClose }) {
                 ListEmptyComponent={<Text style={{ color:'#888' }}>Sin ítems</Text>}
               />
               <View style={{ height:8 }} />
-              <Button title="Anular venta (reponer stock)" color="#b00020" onPress={doVoid} />
+              <Button title="Anular venta (reponer stock)" color={theme.colors.danger} onPress={doVoid} />
               <View style={{ height:8 }} />
               <Button title="Cerrar" onPress={()=>setDetailOpen(false)} />
             </>
@@ -253,4 +247,5 @@ const styles = StyleSheet.create({
   saleSub:{ color:'#666' },
   saleGo:{ fontSize:22, color:'#999', marginLeft:8 },
   itemRow:{ flexDirection:'row', alignItems:'center', justifyContent:'space-between', paddingVertical:8, borderBottomWidth:1, borderColor:'#eee' },
+  clearBtn:{ borderWidth:1, borderColor:'#e6e6e6', paddingHorizontal:12, paddingVertical:6, borderRadius:999, backgroundColor:'#fff' },
 });
