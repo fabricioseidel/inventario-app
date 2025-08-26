@@ -1,242 +1,187 @@
 // src/screens/SellScreen.js
 import React, { useMemo, useState } from 'react';
-import {
-  View, Text, TextInput, Button, FlatList, Alert,
-  StyleSheet, Modal, SafeAreaView, TouchableOpacity
-} from 'react-native';
+import { View, Text, StyleSheet, TextInput, TouchableOpacity, FlatList, Alert, Platform, KeyboardAvoidingView } from 'react-native';
 import ScannerScreen from './ScannerScreen';
 import { getProductByBarcode, recordSale } from '../db';
+import { theme } from '../ui/Theme';
 
 const PMETHODS = ['efectivo', 'debito', 'credito', 'transferencia'];
 
-function formatError(e) {
-  if (!e) return 'Error desconocido';
-  if (typeof e === 'string') return e;
-  const parts = [];
-  if (e.message) parts.push(e.message);
-  if (e.code) parts.push(`(code: ${e.code})`);
-  // Algunos errores de expo-sqlite traen "nativeStackAndroid"/"userInfo"/"toString"
-  const extra = e.toString && e.toString();
-  if (extra && extra !== e.message) parts.push(extra);
-  return parts.filter(Boolean).join('\n');
-}
-
 export default function SellScreen({ onClose, onSold }) {
-  const [scanOpen, setScanOpen] = useState(false);
-  const [code, setCode] = useState('');
-  const [cart, setCart] = useState([]); // [{ barcode, name, unit_price, qty, stock }]
-  const [paymentMethod, setPaymentMethod] = useState('efectivo');
+  const [scannerOpen, setScannerOpen] = useState(false);
+  const [barcodeManual, setBarcodeManual] = useState('');
+  const [cart, setCart] = useState([]); // {barcode,name,unit_price,qty}
+  const [method, setMethod] = useState('efectivo');
   const [amountPaid, setAmountPaid] = useState('');
-  const [note, setNote] = useState('');
-  const [saving, setSaving] = useState(false);
 
-  const total = useMemo(
-    () => cart.reduce((acc, i) => acc + (Number(i.unit_price) * Number(i.qty)), 0),
-    [cart]
-  );
-  const change = useMemo(() => Math.max(0, Number(amountPaid || 0) - total), [amountPaid, total]);
+  const total = useMemo(() => cart.reduce((a, it) => a + (Number(it.qty || 0) * Number(it.unit_price || 0)), 0), [cart]);
+  const change = Math.max(0, Number(amountPaid || 0) - total);
+  const canPay = total > 0 && (method !== 'efectivo' || Number(amountPaid || 0) >= total);
 
   const addOrInc = (p) => {
     setCart(prev => {
-      const idx = prev.findIndex(x => x.barcode === p.barcode);
-      if (idx >= 0) {
-        const copy = [...prev];
-        copy[idx] = { ...copy[idx], qty: Number(copy[idx].qty) + 1 };
-        return copy;
+      const i = prev.findIndex(x => x.barcode === p.barcode);
+      if (i >= 0) {
+        const next = [...prev];
+        next[i] = { ...next[i], qty: Number(next[i].qty || 0) + 1, unit_price: p.sale_price ?? next[i].unit_price };
+        return next;
       }
-      return [...prev, {
-        barcode: p.barcode,
-        name: p.name || p.category || '(Sin nombre)',
-        unit_price: Number(p.sale_price ?? p.salePrice ?? 0),
-        qty: 1,
-        stock: Number(p.stock ?? 0)
-      }];
+      return [...prev, { barcode: p.barcode, name: p.name || '', unit_price: Number(p.sale_price || 0), qty: 1 }];
     });
   };
 
-  const dec = (barcode) => {
-    setCart(prev => {
-      const idx = prev.findIndex(x => x.barcode === barcode);
-      if (idx < 0) return prev;
-      const item = prev[idx];
-      if (item.qty <= 1) return prev.filter(x => x.barcode !== barcode);
-      const copy = [...prev];
-      copy[idx] = { ...item, qty: item.qty - 1 };
-      return copy;
-    });
+  const scanDone = async (code) => {
+    setScannerOpen(false);
+    const p = await getProductByBarcode(String(code).trim());
+    if (!p) return Alert.alert('No encontrado', 'Ese código no existe en inventario.');
+    addOrInc(p);
   };
 
-  const removeItem = (barcode) => setCart(prev => prev.filter(x => x.barcode !== barcode));
-
-  const addByBarcode = async (barcode) => {
-    const clean = String(barcode || code).trim();
-    if (!clean) return;
-    try {
-      const found = await getProductByBarcode(clean);
-      if (!found) {
-        Alert.alert('No encontrado', `El código ${clean} no existe en productos.`);
-        return;
-      }
-      addOrInc(found);
-      setCode('');
-    } catch {
-      Alert.alert('Error', 'No se pudo buscar el producto.');
-    }
+  const addManual = async () => {
+    const code = (barcodeManual || '').trim();
+    if (!code) return;
+    setBarcodeManual('');
+    const p = await getProductByBarcode(code);
+    if (!p) return Alert.alert('No encontrado', 'Ese código no existe en inventario.');
+    addOrInc(p);
   };
 
-  const finalizeSale = async () => {
-    if (cart.length === 0) return Alert.alert('Atención', 'El carrito está vacío.');
+  const inc = (b) => setCart(prev => prev.map(it => it.barcode === b ? { ...it, qty: it.qty + 1 } : it));
+  const dec = (b) => setCart(prev => prev.map(it => it.barcode === b ? { ...it, qty: Math.max(1, it.qty - 1) } : it));
+  const removeItem = (b) => setCart(prev => prev.filter(it => it.barcode !== b));
+  const clear = () => setCart([]);
 
-    // Aviso de stock (no bloquea)
-    const over = cart.filter(i => typeof i.stock === 'number' && i.stock < i.qty);
-    if (over.length) {
-      const list = over.map(i => `${i.name} (stock ${i.stock}, qty ${i.qty})`).join('\n');
-      const cont = await new Promise((resolve) => {
-        Alert.alert(
-          'Stock insuficiente',
-          `Los siguientes ítems superan el stock:\n\n${list}\n\n¿Deseas continuar igual? (se evita stock negativo)`,
-          [
-            { text: 'Cancelar', style: 'cancel', onPress: () => resolve(false) },
-            { text: 'Continuar', style: 'destructive', onPress: () => resolve(true) },
-          ]
-        );
-      });
-      if (!cont) return;
+  const pay = async () => {
+    if (!canPay) {
+      return Alert.alert('Monto insuficiente', 'El monto ingresado es menor al total.');
     }
-
-    if (paymentMethod === 'efectivo' && Number(amountPaid || 0) < total) {
-      return Alert.alert('Atención', 'El monto recibido es menor al total.');
-    }
-
     try {
-      setSaving(true);
-      await recordSale(cart, {
-        paymentMethod,
-        amountPaid: Number(amountPaid || 0),
-        note,
-        discount: 0,
-        tax: 0
-      });
-
-      Alert.alert('Venta registrada', 'La venta se guardó correctamente.');
-      setCart([]);
-      setPaymentMethod('efectivo');
+      const payload = { paymentMethod: method, amountPaid: Number(amountPaid || 0) };
+      await recordSale(cart, payload);
+      Alert.alert('Venta registrada', `Total: $${total.toFixed(0)}${method === 'efectivo' ? `\nVuelto: $${change.toFixed(0)}` : ''}`);
+      clear();
       setAmountPaid('');
-      setNote('');
       onSold && onSold();
-      onClose && onClose(true);
     } catch (e) {
-      const msg = formatError(e);
-      Alert.alert('Error', `No se pudo registrar la venta.\n\nDetalle:\n${msg}`);
-    } finally {
-      setSaving(false);
+      Alert.alert('Error', 'No se pudo registrar la venta.');
     }
   };
-
-  const renderItem = ({ item }) => (
-    <View style={styles.line}>
-      <View style={{ flex: 1 }}>
-        <Text style={{ fontWeight:'700' }}>{item.name}</Text>
-        <Text style={{ color:'#555' }}>{item.barcode} · ${item.unit_price} × {item.qty} = ${item.unit_price * item.qty}</Text>
-      </View>
-      <View style={{ flexDirection:'row', gap:6 }}>
-        <TouchableOpacity style={styles.btnMini} onPress={() => dec(item.barcode)}><Text>-</Text></TouchableOpacity>
-        <TouchableOpacity style={styles.btnMini} onPress={() => addOrInc(item)}><Text>+</Text></TouchableOpacity>
-        <TouchableOpacity style={[styles.btnMini, { backgroundColor:'#fce'}]} onPress={() => removeItem(item.barcode)}><Text>✕</Text></TouchableOpacity>
-      </View>
-    </View>
-  );
 
   return (
-    <SafeAreaView style={{ flex:1, backgroundColor:'#fff' }}>
-      <View style={{ flex:1, padding:16 }}>
-        <Text style={styles.title}>Caja / Ventas</Text>
-
-        <View style={{ flexDirection:'row', gap:8, marginBottom:12 }}>
-          <Button title="📷 Escanear" onPress={() => setScanOpen(true)} />
-        </View>
-
-        <View style={{ flexDirection:'row', gap:8, marginBottom:12, alignItems:'center' }}>
+    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.select({ ios: 'padding', android: undefined })}>
+      <View style={{ paddingHorizontal: 16, paddingTop: 12, flex: 1 }}>
+        {/* Entrada rápida */}
+        <View style={styles.row}>
+          <TouchableOpacity style={styles.primaryBtn} onPress={() => setScannerOpen(true)}>
+            <Text style={styles.primaryBtnText}>📷 Escanear</Text>
+          </TouchableOpacity>
           <TextInput
-            placeholder="Código de barras"
-            style={[styles.input, { flex:1 }]}
-            keyboardType="default"
-            autoCapitalize="none"
-            value={code}
-            onChangeText={setCode}
-            onSubmitEditing={() => addByBarcode()}
+            style={[styles.input, { flex: 1 }]}
+            placeholder="Código manual…"
+            value={barcodeManual}
+            onChangeText={setBarcodeManual}
+            onSubmitEditing={addManual}
+            keyboardType="numeric"
+            returnKeyType="done"
           />
-          <Button title="Añadir" onPress={() => addByBarcode()} />
+          <TouchableOpacity style={styles.ghostBtn} onPress={addManual}><Text style={styles.ghostBtnText}>Agregar</Text></TouchableOpacity>
         </View>
 
+        {/* Lista de ítems */}
         <FlatList
           data={cart}
-          keyExtractor={(it) => it.barcode}
-          renderItem={renderItem}
-          ListEmptyComponent={<Text style={{ color:'#888' }}>Carrito vacío</Text>}
-          style={{ flex:1, marginBottom:12 }}
+          keyExtractor={(it) => String(it.barcode)}
+          contentContainerStyle={{ paddingVertical: 8 }}
+          renderItem={({ item }) => (
+            <View style={styles.item}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.itemTitle}>{item.name || item.barcode}</Text>
+                <Text style={styles.itemSub}>{item.barcode}</Text>
+              </View>
+              <Text style={styles.itemPrice}>${Number(item.unit_price).toFixed(0)}</Text>
+              <View style={styles.qtyBox}>
+                <TouchableOpacity style={styles.qtyBtn} onPress={() => dec(item.barcode)}><Text style={styles.qtyTxt}>−</Text></TouchableOpacity>
+                <Text style={styles.qtyVal}>{item.qty}</Text>
+                <TouchableOpacity style={styles.qtyBtn} onPress={() => inc(item.barcode)}><Text style={styles.qtyTxt}>＋</Text></TouchableOpacity>
+              </View>
+              <TouchableOpacity onPress={() => removeItem(item.barcode)}><Text style={{ color: theme.colors.danger, marginLeft: 8 }}>Eliminar</Text></TouchableOpacity>
+            </View>
+          )}
+          ListEmptyComponent={<Text style={{ color: '#888', marginTop: 10 }}>Escanea o agrega productos…</Text>}
         />
 
+        {/* Totales y pago */}
         <View style={styles.box}>
           <Text style={styles.total}>Total: ${total.toFixed(0)}</Text>
 
-          <View style={{ flexDirection:'row', flexWrap:'wrap', gap:8, marginVertical:8 }}>
-            {PMETHODS.map(m => (
-              <TouchableOpacity
-                key={m}
-                onPress={() => setPaymentMethod(m)}
-                style={[styles.pill, paymentMethod === m && styles.pillActive]}
-              >
-                <Text style={{ color: paymentMethod === m ? '#fff' : '#333' }}>{m}</Text>
-              </TouchableOpacity>
-            ))}
+          <Text style={styles.label}>Método de pago</Text>
+          <View style={styles.pills}>
+            {PMETHODS.map(m => {
+              const active = method === m;
+              return (
+                <TouchableOpacity key={m} style={[styles.pill, active && styles.pillOn]} onPress={() => setMethod(m)}>
+                  <Text style={[styles.pillTxt, active && { color: '#fff' }]}>{m}</Text>
+                </TouchableOpacity>
+              );
+            })}
           </View>
 
-          {paymentMethod === 'efectivo' && (
-            <View style={{ flexDirection:'row', alignItems:'center', gap:8 }}>
-              <Text>Monto recibido:</Text>
-              <TextInput
-                style={[styles.input, { flex:0, width:120 }]}
-                keyboardType="numeric"
-                value={amountPaid}
-                onChangeText={setAmountPaid}
-                placeholder="0"
-              />
-              <Text>Vuelto: ${change.toFixed(0)}</Text>
-            </View>
+          {method === 'efectivo' && (
+            <>
+              <Text style={styles.label}>Monto recibido</Text>
+              <TextInput style={styles.input} placeholder="0" keyboardType="numeric" value={String(amountPaid)} onChangeText={setAmountPaid} />
+              <View style={[styles.alertBox, Number(amountPaid || 0) < total ? { backgroundColor: theme.colors.dangerBg, borderColor: '#f4b4bf' } : { backgroundColor: theme.colors.successBg, borderColor: '#bfe8d3' }]}>
+                <Text style={{ fontWeight: '600' }}>
+                  {Number(amountPaid || 0) < total ? 'Monto insuficiente' : `Vuelto: $${change.toFixed(0)}`}
+                </Text>
+              </View>
+            </>
           )}
 
-          <TextInput
-            style={[styles.input, { marginTop:8 }]}
-            placeholder="Notas (opcional)"
-            value={note}
-            onChangeText={setNote}
-          />
-
-          <View style={{ height:8 }} />
-          <Button title={saving ? 'Guardando…' : 'Pagar y registrar'} onPress={finalizeSale} disabled={saving} />
-          <View style={{ height:8 }} />
-          <Button title="Cerrar" color="#666" onPress={() => onClose && onClose(false)} />
+          <TouchableOpacity disabled={!canPay} style={[styles.payBtn, !canPay && { opacity: 0.6 }]} onPress={pay}>
+            <Text style={styles.payBtnTxt}>Pagar y registrar</Text>
+          </TouchableOpacity>
         </View>
-
-        <Modal visible={scanOpen} animationType="fade" onRequestClose={() => setScanOpen(false)}>
-          <ScannerScreen
-            onClose={() => setScanOpen(false)}
-            onScanned={(scannedCode) => { setScanOpen(false); addByBarcode(scannedCode); }}
-          />
-        </Modal>
       </View>
-    </SafeAreaView>
+
+      {/* Scanner */}
+      {scannerOpen && (
+        <ScannerScreen
+          onClose={() => setScannerOpen(false)}
+          onScanned={scanDone}
+        />
+      )}
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  title: { fontSize: 18, fontWeight: '700', marginBottom: 10 },
-  input: { borderWidth: 1, borderColor: '#ddd', borderRadius: 6, padding: 8, backgroundColor: '#fff', marginBottom: 8 },
-  line: { flexDirection:'row', alignItems:'center', paddingVertical: 8, borderBottomWidth:1, borderColor:'#eee' },
-  btnMini: { borderWidth:1, borderColor:'#ddd', borderRadius:6, paddingHorizontal:10, paddingVertical:6, backgroundColor:'#f8f8f8' },
-  box: { borderWidth:1, borderColor:'#eee', borderRadius:12, padding:12, backgroundColor:'#fafafa' },
-  pill: { borderWidth:1, borderColor:'#ccc', borderRadius:999, paddingHorizontal:12, paddingVertical:6, backgroundColor:'#fff' },
-  pillActive: { backgroundColor:'#111', borderColor:'#111' },
-  total: { fontWeight:'800', fontSize:16 }
+  row: { flexDirection: 'row', gap: 8, alignItems: 'center' },
+  input: { borderWidth: 1, borderColor: '#e6e6e6', borderRadius: 12, padding: Platform.OS === 'ios' ? 12 : 10, backgroundColor: '#fff' },
+  primaryBtn: { backgroundColor: '#111', borderRadius: 12, paddingVertical: 12, paddingHorizontal: 14 },
+  primaryBtnText: { color: '#fff', fontWeight: '700' },
+  ghostBtn: { borderWidth: 1, borderColor: '#e6e6e6', borderRadius: 12, paddingVertical: 12, paddingHorizontal: 14, backgroundColor: '#fff' },
+  ghostBtnText: { color: '#333', fontWeight: '700' },
+
+  item: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1, borderColor: '#eee' },
+  itemTitle: { fontWeight: '700' },
+  itemSub: { color: '#666' },
+  itemPrice: { width: 70, textAlign: 'right', fontWeight: '700' },
+  qtyBox: { flexDirection: 'row', alignItems: 'center', marginLeft: 8 },
+  qtyBtn: { borderWidth: 1, borderColor: '#ddd', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 4, backgroundColor: '#fff' },
+  qtyTxt: { fontWeight: '800', fontSize: 16 },
+  qtyVal: { width: 28, textAlign: 'center', fontWeight: '700' },
+
+  box: { marginTop: 12, borderWidth: 1, borderColor: '#eee', borderRadius: 12, backgroundColor: '#fff', padding: 12 },
+  total: { fontSize: 16, fontWeight: '800', marginBottom: 8 },
+  label: { fontSize: 12, color: '#666', marginTop: 8, marginBottom: 6 },
+  pills: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  pill: { borderWidth: 1, borderColor: '#ddd', borderRadius: 999, paddingHorizontal: 12, paddingVertical: 6, backgroundColor: '#fff' },
+  pillOn: { backgroundColor: '#111', borderColor: '#111' },
+  pillTxt: { color: '#333', fontWeight: '700' },
+
+  alertBox: { marginTop: 8, borderWidth: 1, borderRadius: 10, padding: 10 },
+
+  payBtn: { marginTop: 12, backgroundColor: '#111', borderRadius: 12, padding: 14, alignItems: 'center' },
+  payBtnTxt: { color: '#fff', fontWeight: '800' },
 });
