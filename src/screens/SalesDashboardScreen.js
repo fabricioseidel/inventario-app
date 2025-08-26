@@ -2,6 +2,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { View, Text, SafeAreaView, StyleSheet, TouchableOpacity, ActivityIndicator, ScrollView, Button, Alert } from 'react-native';
 import { getSalesSeries } from '../db';
+import { theme } from '../ui/Theme';
 
 function startOfDay(d){ const x=new Date(d); x.setHours(0,0,0,0); return x; }
 function addDays(d,n){ const x=new Date(d); x.setDate(x.getDate()+n); return x; }
@@ -10,13 +11,12 @@ function addMonths(d,n){ const x=new Date(d); x.setMonth(x.getMonth()+n); return
 export default function SalesDashboardScreen({ onClose }){
   const [mode, setMode] = useState('7d'); // '7d' | '30d' | '12m'
   const [loading, setLoading] = useState(false);
-  const [series, setSeries] = useState([]); // [{bucket,total,n}]
+  const [series, setSeries] = useState([]);
 
   const range = useMemo(()=>{
     const now = new Date();
     if (mode==='7d'){ const to=addDays(startOfDay(now),1)-1; const from=addDays(startOfDay(now),-6).getTime(); return { from, to, gran:'day' }; }
     if (mode==='30d'){ const to=addDays(startOfDay(now),1)-1; const from=addDays(startOfDay(now),-29).getTime(); return { from, to, gran:'day' }; }
-    // 12 meses
     const first = new Date(now.getFullYear(), now.getMonth(), 1);
     const from = addMonths(first, -11).getTime();
     const to = addDays(addMonths(first,1), -1).getTime();
@@ -38,8 +38,6 @@ export default function SalesDashboardScreen({ onClose }){
   return (
     <SafeAreaView style={{ flex:1, backgroundColor:'#fff' }}>
       <View style={{ padding:16, flex:1 }}>
-        <Text style={styles.title}>Dashboard de Ventas</Text>
-
         <View style={styles.row}>
           {['7d','30d','12m'].map(k=>(
             <TouchableOpacity key={k} style={[styles.pill, mode===k && styles.pillOn]} onPress={()=>setMode(k)}>
@@ -75,7 +73,6 @@ export default function SalesDashboardScreen({ onClose }){
 }
 
 const styles = StyleSheet.create({
-  title:{ fontSize:18, fontWeight:'700', marginBottom:10 },
   row:{ flexDirection:'row', gap:8, marginBottom:8 },
   pill:{ borderWidth:1, borderColor:'#ccc', borderRadius:999, paddingHorizontal:12, paddingVertical:6, backgroundColor:'#fff' },
   pillOn:{ backgroundColor:'#111', borderColor:'#111' },
