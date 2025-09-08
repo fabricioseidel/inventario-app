@@ -1,6 +1,6 @@
 // src/screens/QuickScanScreen.js
 import React, { useState } from 'react';
-import { View, Text, Button, StyleSheet, Modal, Alert } from 'react-native';
+import { View, Text, Button, StyleSheet, Alert } from 'react-native';
 import ScannerScreen from './ScannerScreen';
 import ProductForm from './ProductForm';
 import { getProductByBarcode } from '../db';
@@ -9,6 +9,10 @@ export default function QuickScanScreen({ onClose }) {
   const [scanOpen, setScanOpen] = useState(true);
   const [initial, setInitial] = useState(null);
   const [hasChanges, setHasChanges] = useState(false);
+
+  const closeAll = (changed = hasChanges) => {
+    onClose && onClose(changed);
+  };
 
   const openFormForBarcode = async (barcode) => {
     try {
@@ -30,19 +34,19 @@ export default function QuickScanScreen({ onClose }) {
 
   return (
     <View style={{ flex: 1, backgroundColor: '#fff' }}>
-      <View style={{ padding: 16 }}>
-        <Text style={styles.title}>Escanear (crear / editar)</Text>
-        <Text style={{ color: '#666', marginBottom: 8 }}>Apunta al código. Si existe lo editas; si no, lo creas.</Text>
-        <Button title="Cerrar" color="#666" onPress={() => onClose && onClose(hasChanges)} />
-      </View>
+      {!scanOpen && (
+        <View style={{ padding: 16 }}>
+          <Text style={styles.title}>Escanear (crear / editar)</Text>
+          <Text style={{ color: '#666', marginBottom: 8 }}>Apunta al código. Si existe lo editas; si no, lo creas.</Text>
+          <Button title="Cerrar" color="#666" onPress={() => closeAll()} />
+        </View>
+      )}
 
       {scanOpen && (
-        <Modal visible={scanOpen} animationType="fade" onRequestClose={() => setScanOpen(false)} transparent={false}>
-          <ScannerScreen
-            onClose={() => setScanOpen(false)}
-            onScanned={(scannedCode) => { setScanOpen(false); openFormForBarcode(scannedCode); }}
-          />
-        </Modal>
+        <ScannerScreen
+          onClose={() => closeAll()}
+          onScanned={(scannedCode) => { setScanOpen(false); openFormForBarcode(scannedCode); }}
+        />
       )}
 
       {!scanOpen && initial && (

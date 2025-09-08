@@ -43,13 +43,14 @@ export default function ScannerScreen({ onClose, onScanned }) {
   return (
     <View style={{ flex:1, backgroundColor:'black' }}>
       <BarCodeScanner
-        style={{ flex:1 }}
+        style={StyleSheet.absoluteFillObject}
         onBarCodeScanned={scanned ? undefined : handleBarCodeScanned}
         // Puedes limitar tipos si deseas mayor precisión:
         // barCodeTypes={[BarCodeScanner.Constants.BarCodeType.ean13, BarCodeScanner.Constants.BarCodeType.ean8, BarCodeScanner.Constants.BarCodeType.code128]}
       />
+      <View style={styles.targetBox} pointerEvents="none" />
       <View style={styles.overlay}>
-        <Text style={styles.text}>{scanned ? 'Código escaneado' : 'Escanea un código'}</Text>
+        <Text style={styles.text}>{scanned ? 'Código escaneado' : 'Alinea el código dentro del marco'}</Text>
         {scanned && <Button title="Escanear otro" onPress={() => setScanned(false)} />}
         <Button title="Cerrar" onPress={onClose} />
       </View>
@@ -64,4 +65,14 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.55)', padding: 14, borderRadius: 12, gap: 10
   },
   text: { color: '#fff', textAlign: 'center', fontWeight: '600' },
+  targetBox: {
+    position: 'absolute',
+    top: '20%',
+    left: '10%',
+    right: '10%',
+    bottom: '30%',
+    borderWidth: 2,
+    borderColor: '#fff',
+    borderRadius: 12,
+  },
 });
