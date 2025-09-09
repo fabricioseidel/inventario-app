@@ -19,7 +19,7 @@ import FAB from './src/ui/FAB';
 import { theme } from './src/ui/Theme';
 
 // Sync cloud
-import { syncNow } from './src/sync';
+import { syncNow, initRealtimeSync } from './src/sync';
 
 export default function App() {
   const [ready, setReady] = useState(false);
@@ -43,6 +43,7 @@ export default function App() {
 
         // Auto-sync al iniciar (si hay internet)
         try { await syncNow(); await refresh(); } catch {}
+        initRealtimeSync();
       } catch {
         Alert.alert('Error', 'Fallo al inicializar la base de datos');
       }

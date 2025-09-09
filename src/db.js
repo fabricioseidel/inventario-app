@@ -302,6 +302,50 @@ export function recordSale(cart, opts = {}){
   });
 }
 
+export function insertSaleFromCloud(payload){
+  const items = Array.isArray(payload?.items) ? payload.items : [];
+  const ts = Number(payload?.ts || Date.now());
+  const total = Number(payload?.total || 0);
+  const payment = payload?.payment_method || payload?.paymentMethod || null;
+  const cashReceived = payload?.cash_received ?? payload?.cashReceived ?? null;
+  const change = payload?.change_given ?? payload?.changeGiven ?? null;
+  const discount = Number(payload?.discount || 0) || 0;
+  const tax = Number(payload?.tax || 0) || 0;
+  const notes = payload?.notes || null;
+
+  return new Promise((resolve,reject)=>{
+    let firstError=null;
+    db().transaction((tx)=>{
+      tx.executeSql(
+        `INSERT INTO sales (ts,total,payment_method,cash_received,change_given,discount,tax,notes,voided)
+         VALUES (?,?,?,?,?,?,?, ?, 0);`,
+        [ts,total,payment,cashReceived,change,discount,tax,notes],
+        (_insert,res)=>{
+          const saleId = res.insertId;
+          (items||[]).forEach(it=>{
+            const qty = Number(it.qty||0)||0;
+            const unit = Number(it.unit_price||0)||0;
+            const subtotal = qty*unit;
+            tx.executeSql(
+              `INSERT INTO sale_items (sale_id,barcode,name,qty,unit_price,subtotal) VALUES (?,?,?,?,?,?);`,
+              [saleId, String(it.barcode), it.name||null, qty, unit, subtotal],
+              undefined,
+              (_,_e)=>{ firstError = firstError || _e; return true; }
+            );
+            tx.executeSql(
+              `UPDATE products SET stock = CASE WHEN IFNULL(stock,0) - ? < 0 THEN 0 ELSE IFNULL(stock,0) - ? END, updated_at = ? WHERE barcode = ?;`,
+              [qty,qty,ts,String(it.barcode)],
+              undefined,
+              (_,_e)=>{ firstError = firstError || _e; return true; }
+            );
+          });
+        },
+        (_,_e)=>{ firstError = firstError || _e; return true; }
+      );
+    }, (txErr)=> reject(firstError||txErr), ()=> resolve(true) );
+  });
+}
+
 export function listRecentSales(limit=50){
   return new Promise((resolve,reject)=>{
     db().transaction((tx)=>{
