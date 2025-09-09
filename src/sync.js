@@ -4,7 +4,8 @@ import { Platform } from 'react-native';
 import {
   getUnsyncedSales, markSaleSynced,
   upsertProductsBulk, upsertCategoriesBulk,
-  listLocalProductsUpdatedAfter, listProducts, listCategories
+  listLocalProductsUpdatedAfter, listProducts, listCategories,
+  insertSaleFromCloud, insertOrUpdateProduct
 } from './db';
 
 const DEVICE_ID = `${Platform.OS}-v1`;
@@ -97,4 +98,62 @@ export async function syncNow() {
   // 2) Luego bajar lo más reciente
   const lastLocal = await listLocalProductsUpdatedAfter();
   await pullProducts({ sinceTs: lastLocal });
+}
+
+// ---------- REALTIME ----------
+let realtimeStarted = false;
+export function initRealtimeSync() {
+  if (realtimeStarted) return;
+  realtimeStarted = true;
+
+  supabase
+    .channel('realtime-inventory')
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'products' },
+      async (payload) => {
+        const p = payload.new;
+        try {
+          await insertOrUpdateProduct({
+            barcode: p.barcode,
+            name: p.name,
+            category: p.category,
+            purchasePrice: p.purchase_price,
+            salePrice: p.sale_price,
+            expiryDate: p.expiry_date,
+            stock: p.stock,
+          });
+        } catch (e) {
+          console.warn('realtime product error', e);
+        }
+      }
+    )
+    .on(
+      'postgres_changes',
+      { event: 'INSERT', schema: 'public', table: 'sales' },
+      async (payload) => {
+        const s = payload.new || {};
+        if (s.device_id === DEVICE_ID) return;
+        let items = s.items || s.items_json || [];
+        if (typeof items === 'string') {
+          try { items = JSON.parse(items); } catch {}
+        }
+        try {
+          await insertSaleFromCloud({
+            ts: Date.parse(s.created_at || s.ts || new Date().toISOString()),
+            total: s.total,
+            payment_method: s.payment_method,
+            cash_received: s.cash_received,
+            change_given: s.change_given,
+            discount: s.discount,
+            tax: s.tax,
+            notes: s.notes,
+            items,
+          });
+        } catch (e) {
+          console.warn('realtime sale error', e);
+        }
+      }
+    )
+    .subscribe();
 }
