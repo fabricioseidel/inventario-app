@@ -211,6 +211,14 @@ export default function App() {
 
       {tab === 'reports' && (
         <View style={styles.content}>
+          <View style={styles.actionRow}>
+            <TouchableOpacity
+              style={[styles.secondaryBtn, { borderColor: '#111' }]}
+              onPress={manualSync}
+            >
+              <Text style={[styles.secondaryBtnText, { fontWeight: '800' }]}>🔄 Sync</Text>
+            </TouchableOpacity>
+          </View>
           <View style={styles.reportGrid}>
             <TouchableOpacity style={styles.reportCard} onPress={() => setOpenHistory(true)}>
               <Text style={styles.reportEmoji}>📈</Text>

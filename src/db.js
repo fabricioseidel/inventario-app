@@ -358,6 +358,16 @@ export function listRecentSales(limit=50){
     }, reject);
   });
 }
+
+export function getLastSaleTs(){
+  return new Promise(resolve=>{
+    db().transaction(tx=>{
+      tx.executeSql(`SELECT MAX(ts) as m FROM sales;`, [], (_,_r)=>{
+        resolve(_r.rows.item(0)?.m || 0);
+      });
+    });
+  });
+}
 export function listSalesBetween(fromTs,toTs){
   return new Promise((resolve,reject)=>{
     const params=[]; let where='WHERE COALESCE(voided,0)=0';
