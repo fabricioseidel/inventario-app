@@ -8,7 +8,7 @@ function startOfDay(d){ const x=new Date(d); x.setHours(0,0,0,0); return x; }
 function addDays(d,n){ const x=new Date(d); x.setDate(x.getDate()+n); return x; }
 function addMonths(d,n){ const x=new Date(d); x.setMonth(x.getMonth()+n); return x; }
 
-export default function SalesDashboardScreen({ onClose }){
+export default function SalesDashboardScreen({ onClose, refreshKey }){
   const [mode, setMode] = useState('7d'); // '7d' | '30d' | '12m'
   const [loading, setLoading] = useState(false);
   const [series, setSeries] = useState([]);
@@ -32,7 +32,7 @@ export default function SalesDashboardScreen({ onClose }){
       }catch(e){ Alert.alert('Error','No se pudo cargar el dashboard.'); }
       finally{ setLoading(false); }
     })();
-  }, [range.from, range.to, range.gran]);
+  }, [range.from, range.to, range.gran, refreshKey]);
 
   const max = Math.max(1, ...series.map(r => Number(r.total||0)));
   return (

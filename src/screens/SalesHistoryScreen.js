@@ -14,7 +14,7 @@ function addDays(d,n){ const x=new Date(d); x.setDate(x.getDate()+n); return x; 
 function addMonths(d,n){ const x=new Date(d); x.setMonth(x.getMonth()+n); return x; }
 function fmt(ts){ const d=new Date(ts); const dd=String(d.getDate()).padStart(2,'0'); const mm=String(d.getMonth()+1).padStart(2,'0'); const hh=String(d.getHours()).padStart(2,'0'); const mi=String(d.getMinutes()).padStart(2,'0'); return `${dd}/${mm} ${hh}:${mi}`; }
 
-export default function SalesHistoryScreen({ onClose }) {
+export default function SalesHistoryScreen({ onClose, refreshKey }) {
   const [rangeType, setRangeType] = useState('today');
   const [dStart, setDStart] = useState(startOfDay(new Date()));
   const [dEnd, setDEnd] = useState(endOfDay(new Date()));
@@ -49,7 +49,7 @@ export default function SalesHistoryScreen({ onClose }) {
       } catch { Alert.alert('Error','No se pudo cargar el historial.'); }
       finally { setLoading(false); }
     })();
-  }, [dStart, dEnd]);
+  }, [dStart, dEnd, refreshKey]);
 
   const filtered = useMemo(()=>{
     if (!methods.size) return sales;

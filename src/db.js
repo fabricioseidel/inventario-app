@@ -384,29 +384,46 @@ export function insertSaleFromCloud(payload){
   return new Promise((resolve,reject)=>{
     let firstError=null;
     db().transaction((tx)=>{
+      // Verificar si ya existe una venta con el mismo timestamp y total
       tx.executeSql(
-        `INSERT INTO sales (ts,total,payment_method,cash_received,change_given,discount,tax,notes,voided)
-         VALUES (?,?,?,?,?,?,?, ?, 0);`,
-        [ts,total,payment,cashReceived,change,discount,tax,notes],
-        (_insert,res)=>{
-          const saleId = res.insertId;
-          (items||[]).forEach(it=>{
-            const qty = Number(it.qty||0)||0;
-            const unit = Number(it.unit_price||0)||0;
-            const subtotal = qty*unit;
-            tx.executeSql(
-              `INSERT INTO sale_items (sale_id,barcode,name,qty,unit_price,subtotal) VALUES (?,?,?,?,?,?);`,
-              [saleId, String(it.barcode), it.name||null, qty, unit, subtotal],
-              undefined,
-              (_,_e)=>{ firstError = firstError || _e; return true; }
-            );
-            tx.executeSql(
-              `UPDATE products SET stock = CASE WHEN IFNULL(stock,0) - ? < 0 THEN 0 ELSE IFNULL(stock,0) - ? END, updated_at = ? WHERE barcode = ?;`,
-              [qty,qty,ts,String(it.barcode)],
-              undefined,
-              (_,_e)=>{ firstError = firstError || _e; return true; }
-            );
-          });
+        `SELECT id FROM sales WHERE ts = ? AND total = ? LIMIT 1;`,
+        [ts, total],
+        (_checkTx, checkRes) => {
+          if (checkRes.rows.length > 0) {
+            console.log(`⏭️ Venta duplicada encontrada: ts=${ts}, total=${total}, saltando inserción`);
+            resolve(false);
+            return;
+          }
+          
+          // No existe, proceder con la inserción
+          tx.executeSql(
+            `INSERT INTO sales (ts,total,payment_method,cash_received,change_given,discount,tax,notes,voided)
+             VALUES (?,?,?,?,?,?,?, ?, 0);`,
+            [ts,total,payment,cashReceived,change,discount,tax,notes],
+            (_insert,res)=>{
+              const saleId = res.insertId;
+              console.log(`✅ Venta desde cloud insertada: saleId=${saleId}, ts=${ts}, total=${total}`);
+              
+              (items||[]).forEach(it=>{
+                const qty = Number(it.qty||0)||0;
+                const unit = Number(it.unit_price||0)||0;
+                const subtotal = qty*unit;
+                tx.executeSql(
+                  `INSERT INTO sale_items (sale_id,barcode,name,qty,unit_price,subtotal) VALUES (?,?,?,?,?,?);`,
+                  [saleId, String(it.barcode), it.name||null, qty, unit, subtotal],
+                  undefined,
+                  (_,_e)=>{ firstError = firstError || _e; return true; }
+                );
+                tx.executeSql(
+                  `UPDATE products SET stock = CASE WHEN IFNULL(stock,0) - ? < 0 THEN 0 ELSE IFNULL(stock,0) - ? END, updated_at = ? WHERE barcode = ?;`,
+                  [qty,qty,ts,String(it.barcode)],
+                  undefined,
+                  (_,_e)=>{ firstError = firstError || _e; return true; }
+                );
+              });
+            },
+            (_,_e)=>{ firstError = firstError || _e; return true; }
+          );
         },
         (_,_e)=>{ firstError = firstError || _e; return true; }
       );

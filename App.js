@@ -33,6 +33,8 @@ export default function App() {
   const [openHistory, setOpenHistory] = useState(false);
   const [openDashboard, setOpenDashboard] = useState(false);
   const [openQuickScan, setOpenQuickScan] = useState(false);
+  const [isSyncLoading, setIsSyncLoading] = useState(false);
+  const [lastSyncTime, setLastSyncTime] = useState(Date.now());
 
   useEffect(() => {
     (async () => {
@@ -108,12 +110,23 @@ export default function App() {
   };
 
   const manualSync = async () => {
+    setIsSyncLoading(true);
     try {
+      console.log('🔄 Iniciando sincronización manual...');
       await syncNow();
       await refresh();
+      
+      console.log('🔄 Sincronización completada, refrescando reportes...');
+      
+      // Forzar refresco de reportes incrementando timestamp
+      setLastSyncTime(Date.now());
+      
       Alert.alert('Sync', 'Sincronización completa.');
-    } catch {
-      Alert.alert('Sync', 'Error sincronizando. Revisa internet/clave y vuelve a intentar.');
+    } catch (e) {
+      console.error('❌ Error en sincronización manual:', e);
+      Alert.alert('Sync', `Error sincronizando: ${e.message || 'Revisa internet/clave y vuelve a intentar.'}`);
+    } finally {
+      setIsSyncLoading(false);
     }
   };
 
@@ -162,8 +175,14 @@ export default function App() {
             <TouchableOpacity style={styles.secondaryBtn} onPress={exportJSONFile}>
               <Text style={styles.secondaryBtnText}>Exportar JSON</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={[styles.secondaryBtn, { borderColor: '#111' }]} onPress={manualSync}>
-              <Text style={[styles.secondaryBtnText, { fontWeight: '800' }]}>🔄 Sync</Text>
+            <TouchableOpacity 
+              style={[styles.secondaryBtn, { borderColor: '#111' }]} 
+              onPress={manualSync}
+              disabled={isSyncLoading}
+            >
+              <Text style={[styles.secondaryBtnText, { fontWeight: '800' }]}>
+                {isSyncLoading ? '⏳ Sincronizando...' : '🔄 Sync'}
+              </Text>
             </TouchableOpacity>
           </View>
 
@@ -215,8 +234,11 @@ export default function App() {
             <TouchableOpacity
               style={[styles.secondaryBtn, { borderColor: '#111' }]}
               onPress={manualSync}
+              disabled={isSyncLoading}
             >
-              <Text style={[styles.secondaryBtnText, { fontWeight: '800' }]}>🔄 Sync</Text>
+              <Text style={[styles.secondaryBtnText, { fontWeight: '800' }]}>
+                {isSyncLoading ? '⏳ Sincronizando...' : '🔄 Sync'}
+              </Text>
             </TouchableOpacity>
           </View>
           <View style={styles.reportGrid}>
@@ -261,14 +283,20 @@ export default function App() {
       <Modal visible={openHistory} animationType="slide" onRequestClose={() => setOpenHistory(false)}>
         <SafeAreaView style={{ flex: 1, backgroundColor: '#fff' }}>
           <Header title="Reportes" subtitle="Historial de ventas" compact />
-          <SalesHistoryScreen onClose={() => setOpenHistory(false)} />
+          <SalesHistoryScreen 
+            onClose={() => setOpenHistory(false)} 
+            refreshKey={lastSyncTime}
+          />
         </SafeAreaView>
       </Modal>
 
       <Modal visible={openDashboard} animationType="slide" onRequestClose={() => setOpenDashboard(false)}>
         <SafeAreaView style={{ flex: 1, backgroundColor: '#fff' }}>
           <Header title="Reportes" subtitle="Dashboard" compact />
-          <SalesDashboardScreen onClose={() => setOpenDashboard(false)} />
+          <SalesDashboardScreen 
+            onClose={() => setOpenDashboard(false)} 
+            refreshKey={lastSyncTime}
+          />
         </SafeAreaView>
       </Modal>
     </SafeAreaView>

@@ -31,6 +31,9 @@ async function getDeviceId() {
 export async function pushSales() {
   const pending = await getUnsyncedSales();
   const deviceId = await getDeviceId();
+  
+  console.log(`📤 Subiendo ${pending.length} ventas pendientes desde dispositivo: ${deviceId}`);
+  
   for (const s of pending) {
     const payload = {
       p_total: s.total,
@@ -44,11 +47,16 @@ export async function pushSales() {
       p_client_sale_id: s.client_sale_id,
       p_items: s.items_json,
     };
+    
+    console.log(`📤 Subiendo venta: ${s.client_sale_id}, total: ${s.total}`);
+    
     const { data, error } = await supabase.rpc('apply_sale', payload);
     if (error) {
-      console.warn('push sale error', error);
+      console.warn('Error subiendo venta:', error, 'Payload:', payload);
       continue;
     }
+    
+    console.log(`✅ Venta sincronizada: ${s.client_sale_id} -> ${data}`);
     await markSaleSynced(s.local_sale_id, data);
   }
 }
@@ -109,6 +117,8 @@ export async function pullProducts({ sinceTs } = {}) {
 export async function pullSales({ sinceTs } = {}) {
   const sinceIso = sinceTs ? new Date(sinceTs).toISOString() : '1970-01-01T00:00:00Z';
   const deviceId = await getDeviceId();
+  
+  console.log(`📥 Descargando ventas desde: ${sinceIso}, dispositivo actual: ${deviceId}`);
 
   const { data: sales, error } = await supabase
     .from('sales')
@@ -117,13 +127,25 @@ export async function pullSales({ sinceTs } = {}) {
     .neq('device_id', deviceId)
     .order('created_at', { ascending: true })
     .limit(1000);
-  if (!error && sales?.length) {
+    
+  if (error) {
+    console.error('Error descargando ventas:', error);
+    throw error;
+  }
+  
+  console.log(`📥 Encontradas ${sales?.length || 0} ventas para sincronizar`);
+  
+  if (sales?.length) {
     for (const s of sales) {
       let items = s.items || s.items_json || [];
       if (typeof items === 'string') {
-        try { items = JSON.parse(items); } catch {}
+        try { items = JSON.parse(items); } catch (e) {
+          console.warn('Error parseando items de venta:', e);
+          continue;
+        }
       }
       try {
+        console.log(`📥 Insertando venta remota: ${s.id}, total: ${s.total}`);
         await insertSaleFromCloud({
           ts: Date.parse(s.created_at || s.ts || new Date().toISOString()),
           total: s.total,
@@ -136,7 +158,7 @@ export async function pullSales({ sinceTs } = {}) {
           items,
         });
       } catch (e) {
-        console.warn('pull sale error', e);
+        console.warn('Error insertando venta desde cloud:', e);
       }
     }
   }
@@ -144,16 +166,33 @@ export async function pullSales({ sinceTs } = {}) {
 
 // ---------- SYNC PRINCIPAL ----------
 export async function syncNow() {
-  // 1) Subir primero todo lo local
-  await pushProducts();
-  await pushCategories();
-  await pushSales();
+  console.log('🔄 Iniciando sincronización...');
+  
+  try {
+    // 1) Subir primero todo lo local
+    console.log('📤 Subiendo productos...');
+    await pushProducts();
+    
+    console.log('📤 Subiendo categorías...');
+    await pushCategories();
+    
+    console.log('📤 Subiendo ventas...');
+    await pushSales();
 
-  // 2) Luego bajar lo más reciente
-  const lastProductTs = await listLocalProductsUpdatedAfter();
-  const lastSaleTs = await getLastSaleTs();
-  await pullProducts({ sinceTs: lastProductTs });
-  await pullSales({ sinceTs: lastSaleTs });
+    // 2) Luego bajar lo más reciente
+    console.log('📥 Descargando productos...');
+    const lastProductTs = await listLocalProductsUpdatedAfter();
+    await pullProducts({ sinceTs: lastProductTs });
+    
+    console.log('📥 Descargando ventas...');
+    const lastSaleTs = await getLastSaleTs();
+    await pullSales({ sinceTs: lastSaleTs });
+    
+    console.log('✅ Sincronización completada exitosamente');
+  } catch (error) {
+    console.error('❌ Error en sincronización:', error);
+    throw error;
+  }
 }
 
 // ---------- REALTIME ----------
@@ -190,13 +229,29 @@ export async function initRealtimeSync() {
       { event: 'INSERT', schema: 'public', table: 'sales' },
       async (payload) => {
         const s = payload.new || {};
-        if (s.device_id === deviceId) return;
+        const deviceId = await getDeviceId();
+        
+        console.log(`📡 Venta recibida en tiempo real: id=${s.id}, dispositivo=${s.device_id}, dispositivo_actual=${deviceId}`);
+        
+        if (s.device_id === deviceId) {
+          console.log(`⏭️ Venta es del dispositivo actual, saltando`);
+          return;
+        }
+        
         let items = s.items || s.items_json || [];
         if (typeof items === 'string') {
-          try { items = JSON.parse(items); } catch {}
+          try { 
+            items = JSON.parse(items); 
+            console.log(`📡 Items parseados:`, items);
+          } catch (e) {
+            console.warn(`❌ Error parseando items:`, e);
+            items = [];
+          }
         }
+        
         try {
-          await insertSaleFromCloud({
+          console.log(`📡 Insertando venta en tiempo real...`);
+          const result = await insertSaleFromCloud({
             ts: Date.parse(s.created_at || s.ts || new Date().toISOString()),
             total: s.total,
             payment_method: s.payment_method,
@@ -207,8 +262,9 @@ export async function initRealtimeSync() {
             notes: s.notes,
             items,
           });
+          console.log(`✅ Venta en tiempo real procesada: ${result}`);
         } catch (e) {
-          console.warn('realtime sale error', e);
+          console.error('❌ Error procesando venta en tiempo real:', e);
         }
       }
     )
