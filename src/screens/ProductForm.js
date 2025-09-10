@@ -1,7 +1,7 @@
 // src/screens/ProductForm.js
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  View, Text, StyleSheet, TextInput, ScrollView, TouchableOpacity, KeyboardAvoidingView, Platform, Alert, Modal
+  View, Text, StyleSheet, TextInput, ScrollView, TouchableOpacity, KeyboardAvoidingView, Platform, Alert, Modal, Switch
 } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { insertOrUpdateProduct, listCategories, addCategory } from '../db';
@@ -24,6 +24,7 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
   const [salePrice, setSalePrice] = useState(initial?.salePrice || '');
   const [expiryDate, setExpiryDate] = useState(initial?.expiryDate || '');
   const [stock, setStock] = useState(initial?.stock || '');
+  const [soldByWeight, setSoldByWeight] = useState(initial?.sold_by_weight ? true : false);
 
   const [cats, setCats] = useState([]);
   const [catOpen, setCatOpen] = useState(false);
@@ -49,6 +50,7 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
       salePrice: Number(salePrice || 0),
       expiryDate: expiryDate || null,
       stock: Number(stock || 0),
+      soldByWeight: soldByWeight ? 1 : 0,
     };
     if (!payload.barcode) return Alert.alert('Falta código', 'El código de barras es obligatorio.');
     if (!payload.salePrice && !payload.purchasePrice) {
@@ -92,6 +94,10 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
           </TouchableOpacity>
         </Field>
 
+        <Field label="Se vende por peso">
+          <Switch value={soldByWeight} onValueChange={setSoldByWeight} />
+        </Field>
+
         <View style={{ flexDirection: 'row', gap: 10 }}>
           <View style={{ flex: 1 }}>
             <Field label="Precio compra">
@@ -99,7 +105,7 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
             </Field>
           </View>
           <View style={{ flex: 1 }}>
-            <Field label="Precio venta">
+            <Field label={soldByWeight ? 'Precio por kg' : 'Precio venta'}>
               <TextInput style={styles.input} value={String(salePrice)} onChangeText={setSalePrice} placeholder="0" keyboardType="numeric" />
             </Field>
           </View>
@@ -107,7 +113,7 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
 
         <View style={{ flexDirection: 'row', gap: 10 }}>
           <View style={{ flex: 1 }}>
-            <Field label="Stock">
+            <Field label={soldByWeight ? 'Stock (kg)' : 'Stock'}>
               <TextInput style={styles.input} value={String(stock)} onChangeText={setStock} placeholder="0" keyboardType="numeric" />
             </Field>
           </View>

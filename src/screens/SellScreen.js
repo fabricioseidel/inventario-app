@@ -1,6 +1,6 @@
 // src/screens/SellScreen.js
 import React, { useMemo, useState } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, FlatList, Alert, Platform, KeyboardAvoidingView } from 'react-native';
+import { View, Text, StyleSheet, TextInput, TouchableOpacity, FlatList, Alert, Platform, KeyboardAvoidingView, Modal } from 'react-native';
 import ScannerScreen from './ScannerScreen';
 import { getProductByBarcode, recordSale } from '../db';
 import { theme } from '../ui/Theme';
@@ -10,9 +10,11 @@ const PMETHODS = ['efectivo', 'debito', 'credito', 'transferencia'];
 export default function SellScreen({ onClose, onSold }) {
   const [scannerOpen, setScannerOpen] = useState(false);
   const [barcodeManual, setBarcodeManual] = useState('');
-  const [cart, setCart] = useState([]); // {barcode,name,unit_price,qty}
+  const [cart, setCart] = useState([]); // {barcode,name,unit_price,qty,sold_by_weight}
   const [method, setMethod] = useState('efectivo');
   const [amountPaid, setAmountPaid] = useState('');
+  const [weightProd, setWeightProd] = useState(null);
+  const [weightQty, setWeightQty] = useState('');
 
   const total = useMemo(() => cart.reduce((a, it) => a + (Number(it.qty || 0) * Number(it.unit_price || 0)), 0), [cart]);
   const change = Math.max(0, Number(amountPaid || 0) - total);
@@ -26,15 +28,24 @@ export default function SellScreen({ onClose, onSold }) {
         next[i] = { ...next[i], qty: Number(next[i].qty || 0) + 1, unit_price: p.sale_price ?? next[i].unit_price };
         return next;
       }
-      return [...prev, { barcode: p.barcode, name: p.name || '', unit_price: Number(p.sale_price || 0), qty: 1 }];
+      return [...prev, { barcode: p.barcode, name: p.name || '', unit_price: Number(p.sale_price || 0), qty: 1, sold_by_weight: p.sold_by_weight ? 1 : 0 }];
     });
+  };
+
+  const addProduct = (p) => {
+    if (p.sold_by_weight) {
+      setWeightProd(p);
+      setWeightQty('');
+    } else {
+      addOrInc(p);
+    }
   };
 
   const scanDone = async (code) => {
     setScannerOpen(false);
     const p = await getProductByBarcode(String(code).trim());
     if (!p) return Alert.alert('No encontrado', 'Ese código no existe en inventario.');
-    addOrInc(p);
+    addProduct(p);
   };
 
   const addManual = async () => {
@@ -43,11 +54,18 @@ export default function SellScreen({ onClose, onSold }) {
     setBarcodeManual('');
     const p = await getProductByBarcode(code);
     if (!p) return Alert.alert('No encontrado', 'Ese código no existe en inventario.');
-    addOrInc(p);
+    addProduct(p);
   };
-
-  const inc = (b) => setCart(prev => prev.map(it => it.barcode === b ? { ...it, qty: it.qty + 1 } : it));
-  const dec = (b) => setCart(prev => prev.map(it => it.barcode === b ? { ...it, qty: Math.max(1, it.qty - 1) } : it));
+  const inc = (b) => setCart(prev => prev.map(it => {
+    if (it.barcode !== b) return it;
+    const step = it.sold_by_weight ? 0.1 : 1;
+    return { ...it, qty: Number(it.qty) + step };
+  }));
+  const dec = (b) => setCart(prev => prev.map(it => {
+    if (it.barcode !== b) return it;
+    const step = it.sold_by_weight ? 0.1 : 1;
+    return { ...it, qty: Math.max(step, Number(it.qty) - step) };
+  }));
   const removeItem = (b) => setCart(prev => prev.filter(it => it.barcode !== b));
   const clear = () => setCart([]);
 
@@ -101,7 +119,7 @@ export default function SellScreen({ onClose, onSold }) {
               <Text style={styles.itemPrice}>${Number(item.unit_price).toFixed(0)}</Text>
               <View style={styles.qtyBox}>
                 <TouchableOpacity style={styles.qtyBtn} onPress={() => dec(item.barcode)}><Text style={styles.qtyTxt}>−</Text></TouchableOpacity>
-                <Text style={styles.qtyVal}>{item.qty}</Text>
+                <Text style={styles.qtyVal}>{item.sold_by_weight ? `${Number(item.qty).toFixed(2)}kg` : item.qty}</Text>
                 <TouchableOpacity style={styles.qtyBtn} onPress={() => inc(item.barcode)}><Text style={styles.qtyTxt}>＋</Text></TouchableOpacity>
               </View>
               <TouchableOpacity onPress={() => removeItem(item.barcode)}><Text style={{ color: theme.colors.danger, marginLeft: 8 }}>Eliminar</Text></TouchableOpacity>
@@ -151,6 +169,35 @@ export default function SellScreen({ onClose, onSold }) {
           onScanned={scanDone}
         />
       )}
+
+      {weightProd && (
+        <Modal transparent animationType="fade" visible>
+          <View style={styles.modalBg}>
+            <View style={styles.modalBox}>
+              <Text style={{ fontWeight: '700', marginBottom: 8 }}>{weightProd.name || weightProd.barcode}</Text>
+              <Text style={styles.label}>Cantidad en kg</Text>
+              <TextInput style={styles.input} placeholder="0" keyboardType="numeric" value={weightQty} onChangeText={setWeightQty} />
+              <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
+                <TouchableOpacity style={[styles.ghostBtn, { flex: 1 }]} onPress={() => { setWeightProd(null); setWeightQty(''); }}><Text style={styles.ghostBtnText}>Cancelar</Text></TouchableOpacity>
+                <TouchableOpacity style={[styles.primaryBtn, { flex: 1 }]} onPress={() => {
+                  const q = Number(weightQty || 0);
+                  if (!q) return;
+                  setCart(prev => {
+                    const i = prev.findIndex(x => x.barcode === weightProd.barcode);
+                    if (i >= 0) {
+                      const next = [...prev];
+                      next[i] = { ...next[i], qty: Number(next[i].qty || 0) + q, unit_price: weightProd.sale_price ?? next[i].unit_price };
+                      return next;
+                    }
+                    return [...prev, { barcode: weightProd.barcode, name: weightProd.name || '', unit_price: Number(weightProd.sale_price || 0), qty: q, sold_by_weight: 1 }];
+                  });
+                  setWeightProd(null); setWeightQty('');
+                }}><Text style={styles.primaryBtnText}>Agregar</Text></TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+      )}
     </KeyboardAvoidingView>
   );
 }
@@ -170,7 +217,7 @@ const styles = StyleSheet.create({
   qtyBox: { flexDirection: 'row', alignItems: 'center', marginLeft: 8 },
   qtyBtn: { borderWidth: 1, borderColor: '#ddd', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 4, backgroundColor: '#fff' },
   qtyTxt: { fontWeight: '800', fontSize: 16 },
-  qtyVal: { width: 28, textAlign: 'center', fontWeight: '700' },
+  qtyVal: { width: 60, textAlign: 'center', fontWeight: '700' },
 
   box: { marginTop: 12, borderWidth: 1, borderColor: '#eee', borderRadius: 12, backgroundColor: '#fff', padding: 12 },
   total: { fontSize: 16, fontWeight: '800', marginBottom: 8 },
@@ -184,4 +231,6 @@ const styles = StyleSheet.create({
 
   payBtn: { marginTop: 12, backgroundColor: '#111', borderRadius: 12, padding: 14, alignItems: 'center' },
   payBtnTxt: { color: '#fff', fontWeight: '800' },
+  modalBg: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 },
+  modalBox: { backgroundColor: '#fff', borderRadius: 12, padding: 16, width: '100%' },
 });
