@@ -35,20 +35,28 @@ export async function pushSales() {
   console.log(`📤 Subiendo ${pending.length} ventas pendientes desde dispositivo: ${deviceId}`);
   
   for (const s of pending) {
+    // 🔧 FIX: Usar el timestamp original de la venta, no el momento del sync
+    let originalTimestamp;
+    if (s.ts) {
+      // Convertir timestamp local a ISO string para enviar a Supabase
+      originalTimestamp = new Date(s.ts).toISOString();
+    }
+    
     const payload = {
       p_total: s.total,
       p_payment_method: s.payment_method,
-      p_cash_received: s.cash_received,
-      p_change_given: s.change_given,
-      p_discount: s.discount,
-      p_tax: s.tax,
-      p_notes: s.notes,
+      p_cash_received: s.cash_received || 0,
+      p_change_given: s.change_given || 0,
+      p_discount: s.discount || 0,
+      p_tax: s.tax || 0,
+      p_notes: s.notes || '',
       p_device_id: deviceId,
       p_client_sale_id: s.client_sale_id,
       p_items: s.items_json,
+      p_timestamp: originalTimestamp  // 🔧 Enviar timestamp original
     };
     
-    console.log(`📤 Subiendo venta: ${s.client_sale_id}, total: ${s.total}`);
+    console.log(`📤 Subiendo venta: ${s.client_sale_id}, total: ${s.total}, timestamp: ${originalTimestamp || 'auto'}`);
     
     const { data, error } = await supabase.rpc('apply_sale', payload);
     if (error) {
@@ -123,9 +131,9 @@ export async function pullSales({ sinceTs } = {}) {
   const { data: sales, error } = await supabase
     .from('sales')
     .select('*')
-    .gt('created_at', sinceIso)
+    .gt('ts', sinceIso)  // 🔧 Usar ts en lugar de created_at
     .neq('device_id', deviceId)
-    .order('created_at', { ascending: true })
+    .order('ts', { ascending: true })  // 🔧 Ordenar por ts
     .limit(1000);
     
   if (error) {
@@ -145,16 +153,19 @@ export async function pullSales({ sinceTs } = {}) {
         }
       }
       try {
-        console.log(`📥 Insertando venta remota: ${s.id}, total: ${s.total}`);
+        // 🔧 Usar directamente el timestamp de la venta
+        const tsMillis = s.ts ? new Date(s.ts).getTime() : Date.now();
+        
+        console.log(`📥 Insertando venta remota: ${s.id}, total: ${s.total}, timestamp: ${new Date(tsMillis).toLocaleString()}`);
         await insertSaleFromCloud({
-          ts: Date.parse(s.created_at || s.ts || new Date().toISOString()),
+          ts: tsMillis,
           total: s.total,
           payment_method: s.payment_method,
-          cash_received: s.cash_received,
-          change_given: s.change_given,
-          discount: s.discount,
-          tax: s.tax,
-          notes: s.notes,
+          cash_received: s.cash_received || 0,
+          change_given: s.change_given || 0,
+          discount: s.discount || 0,
+          tax: s.tax || 0,
+          notes: s.notes || '',
           items,
         });
       } catch (e) {
@@ -189,6 +200,7 @@ export async function syncNow() {
     await pullSales({ sinceTs: lastSaleTs });
     
     console.log('✅ Sincronización completada exitosamente');
+    return true;
   } catch (error) {
     console.error('❌ Error en sincronización:', error);
     throw error;
@@ -250,16 +262,19 @@ export async function initRealtimeSync() {
         }
         
         try {
-          console.log(`📡 Insertando venta en tiempo real...`);
+          // 🔧 Usar directamente el timestamp de la venta
+          const tsMillis = s.ts ? new Date(s.ts).getTime() : Date.now();
+          
+          console.log(`📡 Insertando venta en tiempo real, timestamp: ${new Date(tsMillis).toLocaleString()}`);
           const result = await insertSaleFromCloud({
-            ts: Date.parse(s.created_at || s.ts || new Date().toISOString()),
+            ts: tsMillis,
             total: s.total,
             payment_method: s.payment_method,
-            cash_received: s.cash_received,
-            change_given: s.change_given,
-            discount: s.discount,
-            tax: s.tax,
-            notes: s.notes,
+            cash_received: s.cash_received || 0,
+            change_given: s.change_given || 0,
+            discount: s.discount || 0,
+            tax: s.tax || 0,
+            notes: s.notes || '',
             items,
           });
           console.log(`✅ Venta en tiempo real procesada: ${result}`);
