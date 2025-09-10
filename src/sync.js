@@ -5,7 +5,7 @@ import {
   getUnsyncedSales, markSaleSynced,
   upsertProductsBulk, upsertCategoriesBulk,
   listLocalProductsUpdatedAfter, listProducts, listCategories,
-  insertSaleFromCloud, insertOrUpdateProduct
+  insertSaleFromCloud, insertOrUpdateProduct, getLastSaleTs
 } from './db';
 
 const DEVICE_ID = `${Platform.OS}-v1`;
@@ -88,6 +88,45 @@ export async function pullProducts({ sinceTs } = {}) {
   if (!ec && cats?.length) await upsertCategoriesBulk(cats);
 }
 
+export async function pullSales({ sinceTs } = {}) {
+  const sinceIso = sinceTs ? new Date(sinceTs).toISOString() : '1970-01-01T00:00:00Z';
+
+  const { data: sales, error } = await supabase
+    .from('sales')
+    .select('*')
+    .gt('created_at', sinceIso)
+    .order('created_at', { ascending: true })
+    .limit(1000);
+
+  if (error) {
+    console.warn('pull sales error', error);
+    return;
+  }
+
+  for (const s of sales || []) {
+    if (s.device_id === DEVICE_ID) continue;
+    let items = s.items || s.items_json || [];
+    if (typeof items === 'string') {
+      try { items = JSON.parse(items); } catch {}
+    }
+    try {
+      await insertSaleFromCloud({
+        ts: Date.parse(s.created_at || s.ts || new Date().toISOString()),
+        total: s.total,
+        payment_method: s.payment_method,
+        cash_received: s.cash_received,
+        change_given: s.change_given,
+        discount: s.discount,
+        tax: s.tax,
+        notes: s.notes,
+        items,
+      });
+    } catch (e) {
+      console.warn('pull sale local insert error', e);
+    }
+  }
+}
+
 // ---------- SYNC PRINCIPAL ----------
 export async function syncNow() {
   // 1) Subir primero todo lo local
@@ -98,6 +137,8 @@ export async function syncNow() {
   // 2) Luego bajar lo más reciente
   const lastLocal = await listLocalProductsUpdatedAfter();
   await pullProducts({ sinceTs: lastLocal });
+  const lastSale = await getLastSaleTs();
+  await pullSales({ sinceTs: lastSale });
 }
 
 // ---------- REALTIME ----------

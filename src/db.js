@@ -147,10 +147,10 @@ export function insertOrUpdateProduct(p){
 }
 
 export function upsertProductsBulk(list){
-  const now = Date.now();
   return new Promise((resolve,reject)=>{
     db().transaction((tx)=>{
       (list||[]).forEach(p=>{
+        const ts = Date.parse(p.updated_at || p.updatedAt || new Date().toISOString()) || Date.now();
         tx.executeSql(
           `INSERT INTO products (barcode,name,category,purchase_price,sale_price,expiry_date,stock,updated_at)
            VALUES (?,?,?,?,?,?,?,?)
@@ -158,7 +158,7 @@ export function upsertProductsBulk(list){
             name=excluded.name, category=excluded.category,
             purchase_price=excluded.purchase_price, sale_price=excluded.sale_price,
             expiry_date=excluded.expiry_date, stock=excluded.stock, updated_at=?;`,
-          [p.barcode, p.name, p.category, p.purchase_price||0, p.sale_price||0, p.expiry_date||null, p.stock||0, now, now]
+          [p.barcode, p.name, p.category, p.purchase_price||0, p.sale_price||0, p.expiry_date||null, p.stock||0, ts, ts]
         );
       });
     }, reject, ()=>resolve(true));
@@ -169,6 +169,16 @@ export function listLocalProductsUpdatedAfter(){
   return new Promise((resolve)=> {
     db().transaction((tx)=>{
       tx.executeSql(`SELECT MAX(updated_at) as m FROM products;`, [], (_,_r)=>{
+        resolve(_r.rows.item(0)?.m || 0);
+      });
+    });
+  });
+}
+
+export function getLastSaleTs(){
+  return new Promise((resolve)=> {
+    db().transaction((tx)=>{
+      tx.executeSql(`SELECT MAX(ts) as m FROM sales;`, [], (_,_r)=>{
         resolve(_r.rows.item(0)?.m || 0);
       });
     });
