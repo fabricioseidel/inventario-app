@@ -44,6 +44,37 @@ function migrateCloudOutbox(tx, done){
   done && done();
 }
 
+function migrateProductWeight(tx, done){
+  ensureColumnsInTable(tx, 'products', [
+    { name:'by_weight', def:'INTEGER DEFAULT 0' }
+  ], done);
+}
+
+function migrateSaleItemsQty(tx, done){
+  tx.executeSql(`PRAGMA table_info(sale_items);`, [], (_,res)=>{
+    const cols = rowsToArray(res);
+    const qtyCol = cols.find(c=>c.name==='qty');
+    if(qtyCol && String(qtyCol.type).toUpperCase()==='REAL') return done&&done();
+    tx.executeSql(`ALTER TABLE sale_items RENAME TO sale_items_old;`, [], ()=>{
+      tx.executeSql(`CREATE TABLE sale_items(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        sale_id INTEGER NOT NULL,
+        barcode TEXT NOT NULL,
+        name TEXT,
+        qty REAL NOT NULL,
+        unit_price REAL NOT NULL,
+        subtotal REAL NOT NULL,
+        FOREIGN KEY (sale_id) REFERENCES sales(id) ON DELETE CASCADE
+      );`, [], ()=>{
+        tx.executeSql(`INSERT INTO sale_items(id,sale_id,barcode,name,qty,unit_price,subtotal)
+                       SELECT id,sale_id,barcode,name,qty,unit_price,subtotal FROM sale_items_old;`, [], ()=>{
+          tx.executeSql(`DROP TABLE sale_items_old;`, [], ()=>done&&done(), ()=>done&&done());
+        });
+      });
+    }, ()=>done&&done());
+  }, ()=>done&&done());
+}
+
 // ---------- INIT ----------
 export function initDB(){
   return new Promise((resolve,reject)=>{
@@ -115,6 +146,8 @@ export function initDB(){
 
       migrateSalesSchema(tx, ()=>{});
       migrateCloudOutbox(tx, ()=>{});
+      migrateProductWeight(tx, ()=>{});
+      migrateSaleItemsQty(tx, ()=>{});
     }, reject, ()=>resolve(true));
   });
 }
@@ -128,23 +161,26 @@ export function insertOrUpdateProduct(p){
     purchase_price:Number(p.purchasePrice ?? p.purchase_price ?? 0)||0,
     sale_price:Number(p.salePrice ?? p.sale_price ?? 0)||0,
     expiry_date:p.expiryDate ?? p.expiry_date ?? null,
-    stock:Number(p.stock ?? 0)||0
+    stock:Number(p.stock ?? 0)||0,
+    by_weight: p.byWeight ?? p.by_weight ? 1 : 0
   };
   if(!payload.barcode) return Promise.reject(new Error('barcode requerido'));
   return new Promise((resolve,reject)=>{
     db().transaction((tx)=>{
       tx.executeSql(
-        `INSERT INTO products (barcode,name,category,purchase_price,sale_price,expiry_date,stock,updated_at)
-         VALUES (?,?,?,?,?,?,?,?)
+        `INSERT INTO products (barcode,name,category,purchase_price,sale_price,expiry_date,stock,by_weight,updated_at)
+         VALUES (?,?,?,?,?,?,?,?,?)
          ON CONFLICT(barcode) DO UPDATE SET
            name=excluded.name, category=excluded.category,
            purchase_price=excluded.purchase_price, sale_price=excluded.sale_price,
-           expiry_date=excluded.expiry_date, stock=excluded.stock, updated_at=excluded.updated_at;`,
-        [payload.barcode,payload.name,payload.category,payload.purchase_price,payload.sale_price,payload.expiry_date,payload.stock,now]
+           expiry_date=excluded.expiry_date, stock=excluded.stock, by_weight=excluded.by_weight, updated_at=excluded.updated_at;`,
+        [payload.barcode,payload.name,payload.category,payload.purchase_price,payload.sale_price,payload.expiry_date,payload.stock,payload.by_weight,now]
       );
     }, reject, ()=>resolve(true));
   });
 }
+
+
 
 export function upsertProductsBulk(list){
   const now = Date.now();
@@ -152,13 +188,13 @@ export function upsertProductsBulk(list){
     db().transaction((tx)=>{
       (list||[]).forEach(p=>{
         tx.executeSql(
-          `INSERT INTO products (barcode,name,category,purchase_price,sale_price,expiry_date,stock,updated_at)
-           VALUES (?,?,?,?,?,?,?,?)
+          `INSERT INTO products (barcode,name,category,purchase_price,sale_price,expiry_date,stock,by_weight,updated_at)
+           VALUES (?,?,?,?,?,?,?,?,?)
            ON CONFLICT(barcode) DO UPDATE SET
             name=excluded.name, category=excluded.category,
             purchase_price=excluded.purchase_price, sale_price=excluded.sale_price,
-            expiry_date=excluded.expiry_date, stock=excluded.stock, updated_at=?;`,
-          [p.barcode, p.name, p.category, p.purchase_price||0, p.sale_price||0, p.expiry_date||null, p.stock||0, now, now]
+            expiry_date=excluded.expiry_date, stock=excluded.stock, by_weight=excluded.by_weight, updated_at=?;`,
+          [p.barcode, p.name, p.category, p.purchase_price||0, p.sale_price||0, p.expiry_date||null, p.stock||0, p.by_weight?1:0, now, now]
         );
       });
     }, reject, ()=>resolve(true));
@@ -182,6 +218,16 @@ export function upsertCategoriesBulk(list){
         tx.executeSql(`INSERT OR IGNORE INTO categories(name) VALUES (?);`, [c.name]);
       });
     }, reject, ()=>resolve(true));
+  });
+}
+
+export function listLastSaleTs(){
+  return new Promise((resolve)=>{
+    db().transaction((tx)=>{
+      tx.executeSql(`SELECT MAX(ts) as m FROM sales;`, [], (_,_r)=>{
+        resolve(_r.rows.item(0)?.m || 0);
+      });
+    });
   });
 }
 
@@ -212,7 +258,7 @@ export function exportAllProductsOrdered(){
       tx.executeSql(
         `SELECT barcode, barcode AS id, IFNULL(name,'') AS name, IFNULL(category,'') AS category,
                 IFNULL(purchase_price,0) AS purchasePrice, IFNULL(sale_price,0) AS salePrice,
-                IFNULL(expiry_date,'') AS expiryDate, IFNULL(stock,0) AS stock
+                IFNULL(expiry_date,'') AS expiryDate, IFNULL(stock,0) AS stock, IFNULL(by_weight,0) AS byWeight
          FROM products ORDER BY name ASC, id DESC;`,
         [], (_,_r)=>resolve(rowsToArray(_r))
       );

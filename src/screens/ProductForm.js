@@ -1,7 +1,7 @@
 // src/screens/ProductForm.js
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  View, Text, StyleSheet, TextInput, ScrollView, TouchableOpacity, KeyboardAvoidingView, Platform, Alert, Modal
+  View, Text, StyleSheet, TextInput, ScrollView, TouchableOpacity, KeyboardAvoidingView, Platform, Alert, Modal, Switch
 } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { insertOrUpdateProduct, listCategories, addCategory } from '../db';
@@ -24,6 +24,7 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
   const [salePrice, setSalePrice] = useState(initial?.salePrice || '');
   const [expiryDate, setExpiryDate] = useState(initial?.expiryDate || '');
   const [stock, setStock] = useState(initial?.stock || '');
+  const [byWeight, setByWeight] = useState(initial?.by_weight || initial?.byWeight || false);
 
   const [cats, setCats] = useState([]);
   const [catOpen, setCatOpen] = useState(false);
@@ -49,6 +50,7 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
       salePrice: Number(salePrice || 0),
       expiryDate: expiryDate || null,
       stock: Number(stock || 0),
+      byWeight,
     };
     if (!payload.barcode) return Alert.alert('Falta código', 'El código de barras es obligatorio.');
     if (!payload.salePrice && !payload.purchasePrice) {
@@ -90,6 +92,10 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
           <TouchableOpacity style={styles.select} onPress={() => setCatOpen(true)}>
             <Text style={{ color: category ? theme.colors.text : '#999' }}>{category || 'Elegir o crear…'}</Text>
           </TouchableOpacity>
+        </Field>
+
+        <Field label="Se vende por peso">
+          <Switch value={byWeight} onValueChange={setByWeight} />
         </Field>
 
         <View style={{ flexDirection: 'row', gap: 10 }}>
