@@ -1,6 +1,7 @@
 // src/sync.js
 import { supabase } from './supabaseClient';
 import { Platform } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   getUnsyncedSales, markSaleSynced,
   upsertProductsBulk, upsertCategoriesBulk,
@@ -8,11 +9,28 @@ import {
   insertSaleFromCloud, insertOrUpdateProduct, getLastSaleTs
 } from './db';
 
-const DEVICE_ID = `${Platform.OS}-v1`;
+const DEVICE_KEY = 'device_id';
+let DEVICE_ID = null;
+
+async function getDeviceId() {
+  if (DEVICE_ID) return DEVICE_ID;
+  try {
+    const stored = await AsyncStorage.getItem(DEVICE_KEY);
+    if (stored) {
+      DEVICE_ID = stored;
+      return DEVICE_ID;
+    }
+  } catch {}
+  const newId = `${Platform.OS}-${Date.now()}-${Math.random().toString(36).slice(2,10)}`;
+  DEVICE_ID = newId;
+  try { await AsyncStorage.setItem(DEVICE_KEY, newId); } catch {}
+  return DEVICE_ID;
+}
 
 // ---------- VENTAS ----------
 export async function pushSales() {
   const pending = await getUnsyncedSales();
+  const deviceId = await getDeviceId();
   for (const s of pending) {
     const payload = {
       p_total: s.total,
@@ -22,7 +40,7 @@ export async function pushSales() {
       p_discount: s.discount,
       p_tax: s.tax,
       p_notes: s.notes,
-      p_device_id: DEVICE_ID,
+      p_device_id: deviceId,
       p_client_sale_id: s.client_sale_id,
       p_items: s.items_json,
     };
@@ -90,12 +108,13 @@ export async function pullProducts({ sinceTs } = {}) {
 
 export async function pullSales({ sinceTs } = {}) {
   const sinceIso = sinceTs ? new Date(sinceTs).toISOString() : '1970-01-01T00:00:00Z';
+  const deviceId = await getDeviceId();
 
   const { data: sales, error } = await supabase
     .from('sales')
     .select('*')
     .gt('created_at', sinceIso)
-    .neq('device_id', DEVICE_ID)
+    .neq('device_id', deviceId)
     .order('created_at', { ascending: true })
     .limit(1000);
   if (!error && sales?.length) {
@@ -139,9 +158,10 @@ export async function syncNow() {
 
 // ---------- REALTIME ----------
 let realtimeStarted = false;
-export function initRealtimeSync() {
+export async function initRealtimeSync() {
   if (realtimeStarted) return;
   realtimeStarted = true;
+  const deviceId = await getDeviceId();
 
   supabase
     .channel('realtime-inventory')
@@ -170,7 +190,7 @@ export function initRealtimeSync() {
       { event: 'INSERT', schema: 'public', table: 'sales' },
       async (payload) => {
         const s = payload.new || {};
-        if (s.device_id === DEVICE_ID) return;
+        if (s.device_id === deviceId) return;
         let items = s.items || s.items_json || [];
         if (typeof items === 'string') {
           try { items = JSON.parse(items); } catch {}
