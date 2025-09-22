@@ -241,7 +241,7 @@ export function initDB(){
         const migrations = [
           cb => migrateSalesSchema(tx, cb),
           cb => migrateCloudOutbox(tx, cb),
-          cb => migrateProductsWeight(tx, cb), 
+          cb => migrateProductsWeight(tx, cb),
           cb => migrateSaleItemsQty(tx, cb),
           cb => migrateProductImages(tx, cb),
           cb => migrateSaleTransferProof(tx, cb)
@@ -254,20 +254,15 @@ export function initDB(){
         
         try {
           migrations[index](function() {
-            // Pequeña pausa para no bloquear la UI
-            setTimeout(() => {
-              runMigrations(index + 1, doneCb);
-            }, 0);
+            // Ejecutar la siguiente migración inmediatamente para mantenernos dentro de la misma transacción.
+            runMigrations(index + 1, doneCb);
           });
         } catch (err) {
           console.warn(`Error en migración ${index}:`, err);
-          // Continuar con la siguiente migración
-          setTimeout(() => {
-            runMigrations(index + 1, doneCb);
-          }, 0);
+          runMigrations(index + 1, doneCb);
         }
       };
-      
+
       // Iniciar migraciones en secuencia
       runMigrations(0, () => {
         console.log('📋 Migraciones completadas');
