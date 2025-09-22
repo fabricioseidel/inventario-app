@@ -1,11 +1,14 @@
 // src/screens/ProductForm.js
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  View, Text, StyleSheet, TextInput, ScrollView, TouchableOpacity, KeyboardAvoidingView, Platform, Alert, Modal, Switch
+  View, Text, StyleSheet, TextInput, ScrollView, TouchableOpacity, KeyboardAvoidingView, Platform, Alert, Modal, Switch, Image
 } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { insertOrUpdateProduct, listCategories, addCategory } from '../db';
 import { theme } from '../ui/Theme';
+import * as ImagePicker from 'expo-image-picker';
+import { copyFileToDocuments } from '../utils/media';
+import ProductPhotoEditor from '../ui/ProductPhotoEditor';
 
 function Field({ label, children }) {
   return (
@@ -25,6 +28,9 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
   const [expiryDate, setExpiryDate] = useState(initial?.expiryDate || '');
   const [stock, setStock] = useState(initial?.stock || '');
   const [soldByWeight, setSoldByWeight] = useState(initial?.sold_by_weight ? true : false);
+  const [imageUri, setImageUri] = useState(initial?.imageUri || initial?.image_uri || null);
+  const [photoSource, setPhotoSource] = useState(null);
+  const [editorVisible, setEditorVisible] = useState(false);
 
   const [cats, setCats] = useState([]);
   const [catOpen, setCatOpen] = useState(false);
@@ -35,11 +41,80 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
     (async () => { try { setCats(await listCategories()); } catch {} })();
   }, []);
 
+  useEffect(() => {
+    setImageUri(initial?.imageUri || initial?.image_uri || null);
+  }, [initial?.imageUri, initial?.image_uri]);
+
   const filteredCats = useMemo(() => {
     const q = (catSearch || '').trim().toLowerCase();
     if (!q) return cats;
     return cats.filter(c => String(c.name || '').toLowerCase().includes(q));
   }, [catSearch, cats]);
+
+  const openEditorWithSource = useCallback((uri) => {
+    if (!uri) return;
+    setPhotoSource(uri);
+    setEditorVisible(true);
+  }, []);
+
+  const onEditorCancel = useCallback(() => {
+    setEditorVisible(false);
+    setPhotoSource(null);
+  }, []);
+
+  const onEditorSave = useCallback(async (processedUri) => {
+    if (!processedUri) return;
+    try {
+      const saved = await copyFileToDocuments(processedUri, {
+        folder: 'products',
+        prefix: barcode ? `product-${barcode}` : 'product',
+        extension: 'png',
+      });
+      setImageUri(saved);
+    } catch (e) {
+      console.warn('onEditorSave error', e);
+      Alert.alert('Error', 'No se pudo guardar la foto del producto.');
+    } finally {
+      onEditorCancel();
+    }
+  }, [barcode, onEditorCancel]);
+
+  const pickFromCamera = useCallback(async () => {
+    try {
+      const perm = await ImagePicker.requestCameraPermissionsAsync();
+      if (!perm.granted) {
+        Alert.alert('Permiso requerido', 'Activa la cámara para tomar la foto del producto.');
+        return;
+      }
+      const result = await ImagePicker.launchCameraAsync({ allowsEditing: false, quality: 0.8 });
+      if (result.canceled) return;
+      const asset = result.assets?.[0];
+      if (asset?.uri) {
+        openEditorWithSource(asset.uri);
+      }
+    } catch (e) {
+      console.warn('pickFromCamera error', e);
+      Alert.alert('Error', 'No se pudo abrir la cámara.');
+    }
+  }, [openEditorWithSource]);
+
+  const pickFromLibrary = useCallback(async () => {
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({ allowsEditing: false, quality: 0.8, mediaTypes: ImagePicker.MediaTypeOptions.Images });
+      if (result.canceled) return;
+      const asset = result.assets?.[0];
+      if (asset?.uri) {
+        openEditorWithSource(asset.uri);
+      }
+    } catch (e) {
+      console.warn('pickFromLibrary error', e);
+      Alert.alert('Error', 'No se pudo acceder a la galería.');
+    }
+  }, [openEditorWithSource]);
+
+  const removePhoto = useCallback(() => {
+    setImageUri(null);
+  }, []);
 
   const save = async () => {
     const payload = {
@@ -51,6 +126,7 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
       expiryDate: expiryDate || null,
       stock: Number(stock || 0),
       soldByWeight: soldByWeight ? 1 : 0,
+      imageUri: imageUri || null,
     };
     if (!payload.barcode) return Alert.alert('Falta código', 'El código de barras es obligatorio.');
     if (!payload.salePrice && !payload.purchasePrice) {
@@ -59,7 +135,7 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
     try {
       await insertOrUpdateProduct(payload);
       Alert.alert('Guardado', 'Producto guardado correctamente.');
-      onSaved && onSaved();
+      onSaved && onSaved(payload.barcode);
     } catch (e) {
       Alert.alert('Error', 'No se pudo guardar el producto.');
     }
@@ -86,6 +162,41 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
 
         <Field label="Nombre">
           <TextInput style={styles.input} value={name} onChangeText={setName} placeholder="Ej: Coca-Cola 1.5L" />
+        </Field>
+
+        <Field label="Foto del producto">
+          <View style={styles.photoBox}>
+            {imageUri ? (
+              <Image source={{ uri: imageUri }} style={styles.photoPreview} />
+            ) : (
+              <View style={styles.photoPlaceholder}>
+                <Text style={{ color: '#999' }}>Sin foto</Text>
+              </View>
+            )}
+          </View>
+          <View style={styles.photoActions}>
+            <TouchableOpacity style={styles.photoBtn} onPress={pickFromCamera}>
+              <Text style={styles.photoBtnText}>Cámara</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.photoBtn} onPress={pickFromLibrary}>
+              <Text style={styles.photoBtnText}>Galería</Text>
+            </TouchableOpacity>
+            {imageUri ? (
+              <>
+                <TouchableOpacity style={styles.photoBtn} onPress={() => openEditorWithSource(imageUri)}>
+                  <Text style={styles.photoBtnText}>Editar fondo blanco</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[styles.photoBtn, styles.photoBtnDanger]} onPress={removePhoto}>
+                  <Text style={[styles.photoBtnText, { color: theme.colors.danger }]}>Quitar</Text>
+                </TouchableOpacity>
+              </>
+            ) : null}
+          </View>
+          <Text style={styles.photoHint}>
+            {imageUri
+              ? 'Puedes volver a ajustar la imagen para mantener un fondo blanco uniforme.'
+              : 'Captura o elige una imagen y luego edítala para lograr un fondo blanco.'}
+          </Text>
         </Field>
 
         <Field label="Categoría">
@@ -173,6 +284,13 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
           </View>
         </View>
       </Modal>
+
+      <ProductPhotoEditor
+        visible={editorVisible}
+        sourceUri={photoSource || imageUri}
+        onCancel={onEditorCancel}
+        onSave={onEditorSave}
+      />
     </KeyboardAvoidingView>
   );
 }
@@ -187,4 +305,12 @@ const styles = StyleSheet.create({
   btnGhost: { backgroundColor: '#fff', borderColor: '#e6e6e6' },
   btnText: { fontWeight: '700' },
   catItem: { padding: 12, borderRadius: 10, borderWidth: 1, borderColor: '#eee', marginBottom: 8, backgroundColor: '#fff' },
+  photoBox: { alignItems: 'center', marginBottom: 10 },
+  photoPlaceholder: { width: 160, height: 160, borderRadius: 16, borderWidth: 1, borderColor: '#eee', backgroundColor: '#f6f6f6', alignItems: 'center', justifyContent: 'center' },
+  photoPreview: { width: 160, height: 160, borderRadius: 16, borderWidth: 1, borderColor: '#e6e6e6' },
+  photoActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 6 },
+  photoBtn: { borderWidth: 1, borderColor: '#d8e7ff', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8, backgroundColor: '#eef6ff' },
+  photoBtnDanger: { backgroundColor: '#fde7ea', borderColor: '#f4b4bf' },
+  photoBtnText: { color: theme.colors.primary, fontWeight: '600' },
+  photoHint: { color: '#666', marginTop: 6 },
 });
