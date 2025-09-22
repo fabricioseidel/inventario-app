@@ -151,7 +151,17 @@ function migrateSaleTransferProof(tx, done){
 
 // ---------- INIT ----------
 export function initDB(){
+  console.log('🔧 Inicializando base de datos...');
   return new Promise((resolve,reject)=>{
+    // Primero optimizar la base de datos para mejor rendimiento
+    try {
+      db().exec([{ sql: "PRAGMA journal_mode = WAL;", args: [] }], false, () => {});
+      db().exec([{ sql: "PRAGMA synchronous = NORMAL;", args: [] }], false, () => {});
+      db().exec([{ sql: "PRAGMA foreign_keys = ON;", args: [] }], false, () => {});
+    } catch (e) {
+      console.warn('PRAGMA setup falló (no crítico):', e);
+    }
+
     db().transaction((tx)=>{
       tx.executeSql(`PRAGMA foreign_keys = ON;`);
 
@@ -190,7 +200,9 @@ export function initDB(){
         notes TEXT,
         transfer_receipt_uri TEXT,
         transfer_receipt_name TEXT,
-        voided INTEGER DEFAULT 0
+        voided INTEGER DEFAULT 0,
+        is_synced INTEGER DEFAULT 0,
+        cloud_id TEXT
       );`);
       tx.executeSql(`CREATE TABLE IF NOT EXISTS sale_items(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -224,12 +236,42 @@ export function initDB(){
         FOREIGN KEY (template_id) REFERENCES templates(id) ON DELETE CASCADE
       );`);
 
-      migrateSalesSchema(tx, ()=>{});
-      migrateCloudOutbox(tx, ()=>{});
-      migrateProductsWeight(tx, ()=>{});
-      migrateSaleItemsQty(tx, ()=>{});
-      migrateProductImages(tx, ()=>{});
-      migrateSaleTransferProof(tx, ()=>{});
+      // Ejecutar migraciones críticas en secuencia para evitar bloqueos
+      const runMigrations = (index, doneCb) => {
+        const migrations = [
+          cb => migrateSalesSchema(tx, cb),
+          cb => migrateCloudOutbox(tx, cb),
+          cb => migrateProductsWeight(tx, cb), 
+          cb => migrateSaleItemsQty(tx, cb),
+          cb => migrateProductImages(tx, cb),
+          cb => migrateSaleTransferProof(tx, cb)
+        ];
+        
+        if (index >= migrations.length) {
+          doneCb();
+          return;
+        }
+        
+        try {
+          migrations[index](function() {
+            // Pequeña pausa para no bloquear la UI
+            setTimeout(() => {
+              runMigrations(index + 1, doneCb);
+            }, 0);
+          });
+        } catch (err) {
+          console.warn(`Error en migración ${index}:`, err);
+          // Continuar con la siguiente migración
+          setTimeout(() => {
+            runMigrations(index + 1, doneCb);
+          }, 0);
+        }
+      };
+      
+      // Iniciar migraciones en secuencia
+      runMigrations(0, () => {
+        console.log('📋 Migraciones completadas');
+      });
     }, reject, ()=>resolve(true));
   });
 }
@@ -444,6 +486,7 @@ export function insertSaleFromCloud(payload){
   const notes = payload?.notes || null;
   const transferUri = payload?.transfer_receipt_uri ?? payload?.transferReceiptUri ?? null;
   const transferName = payload?.transfer_receipt_name ?? payload?.transferReceiptName ?? null;
+  const cloudId = payload?.cloud_id ?? null;
 
   return new Promise((resolve,reject)=>{
     let firstError=null;
@@ -455,15 +498,15 @@ export function insertSaleFromCloud(payload){
         (_checkTx, checkRes) => {
           if (checkRes.rows.length > 0) {
             console.log(`⏭️ Venta duplicada encontrada: ts=${ts}, total=${total}, saltando inserción`);
-            resolve(false);
+            resolve(checkRes.rows.item(0).id);
             return;
           }
           
           // No existe, proceder con la inserción
           tx.executeSql(
-            `INSERT INTO sales (ts,total,payment_method,cash_received,change_given,discount,tax,notes,transfer_receipt_uri,transfer_receipt_name,voided)
-             VALUES (?,?,?,?,?,?,?,?,?,?,0);`,
-            [ts,total,payment,cashReceived,change,discount,tax,notes,transferUri,transferName],
+            `INSERT INTO sales (ts,total,payment_method,cash_received,change_given,discount,tax,notes,transfer_receipt_uri,transfer_receipt_name,voided,is_synced,cloud_id)
+             VALUES (?,?,?,?,?,?,?,?,?,?,0,1,?);`,
+            [ts,total,payment,cashReceived,change,discount,tax,notes,transferUri,transferName,cloudId],
             (_insert,res)=>{
               const saleId = res.insertId;
               console.log(`✅ Venta desde cloud insertada: saleId=${saleId}, ts=${ts}, total=${total}`);

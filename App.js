@@ -54,16 +54,42 @@ export default function App() {
   useEffect(() => {
     (async () => {
       try {
+        console.log('🚀 Iniciando la aplicación...');
+        // Establecer un timeout para mostrar error si initDB tarda demasiado
+        const initTimeout = setTimeout(() => {
+          Alert.alert(
+            'Inicialización lenta',
+            'La base de datos está tardando en inicializarse. ¿Desea continuar esperando?',
+            [
+              { text: 'Esperar', style: 'default' },
+              { text: 'Cancelar', style: 'cancel', onPress: () => {
+                Alert.alert('Error', 'Inicialización cancelada por el usuario');
+              }}
+            ]
+          );
+        }, 10000); // 10 segundos
+        
         await initDB();
+        clearTimeout(initTimeout);
+        
         await refresh();
         setReady(true);
 
-        InteractionManager.runAfterInteractions(async () => {
-          try { await syncNow(); await refresh(); } catch {}
-          initRealtimeSync();
-        });
-      } catch {
-        Alert.alert('Error', 'Fallo al inicializar la base de datos');
+        // Poner sincronización en background para no bloquear UI
+        setTimeout(() => {
+          InteractionManager.runAfterInteractions(async () => {
+            try { 
+              await syncNow(); 
+              await refresh(); 
+              initRealtimeSync();
+            } catch (e) {
+              console.warn('Error en sincronización inicial:', e);
+            }
+          });
+        }, 1000);
+      } catch (e) {
+        console.error('Error al inicializar DB:', e);
+        Alert.alert('Error', 'Fallo al inicializar la base de datos: ' + (e.message || e));
       }
     })();
 
