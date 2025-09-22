@@ -46,11 +46,12 @@ function migrateCloudOutbox(tx, done){
 
 function migrateProductsWeight(tx, done){
   tx.executeSql(`PRAGMA table_info(products);`, [], (_,_r)=>{
-    let hasSold= false; let stockType='REAL';
+    let hasSold= false; let stockType='REAL'; let hasUpdatedAt=false;
     for(let i=0;i<_r.rows.length;i++){
       const col=_r.rows.item(i);
       if(col.name==='sold_by_weight') hasSold=true;
       if(col.name==='stock') stockType=col.type||'REAL';
+      if(col.name==='updated_at') hasUpdatedAt=true;
     }
     const recreate = String(stockType).toUpperCase() !== 'REAL';
     if(recreate){
@@ -66,8 +67,13 @@ function migrateProductsWeight(tx, done){
         sold_by_weight INTEGER DEFAULT 0,
         updated_at INTEGER
       );`);
-      tx.executeSql(`INSERT INTO products(id,barcode,name,category,purchase_price,sale_price,expiry_date,stock,updated_at,sold_by_weight)
-                     SELECT id,barcode,name,category,purchase_price,sale_price,expiry_date,stock,updated_at,0 FROM _products_tmp;`);
+      const insertSql = hasUpdatedAt
+        ? `INSERT INTO products(id,barcode,name,category,purchase_price,sale_price,expiry_date,stock,updated_at,sold_by_weight)
+                     SELECT id,barcode,name,category,purchase_price,sale_price,expiry_date,stock,updated_at,0 FROM _products_tmp;`
+        : `INSERT INTO products(id,barcode,name,category,purchase_price,sale_price,expiry_date,stock,updated_at,sold_by_weight)
+                     SELECT id,barcode,name,category,purchase_price,sale_price,expiry_date,stock,?,0 FROM _products_tmp;`;
+      const insertParams = hasUpdatedAt ? [] : [Date.now()];
+      tx.executeSql(insertSql, insertParams);
       tx.executeSql(`DROP TABLE _products_tmp;`);
       done&&done();
     } else if(!hasSold){
