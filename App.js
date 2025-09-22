@@ -154,12 +154,12 @@ export default function App() {
       console.log('🔄 Iniciando sincronización manual...');
       await syncNow();
       await refresh();
-      
+
       console.log('🔄 Sincronización completada, refrescando reportes...');
-      
+
       // Forzar refresco de reportes incrementando timestamp
       setLastSyncTime(Date.now());
-      
+
       Alert.alert('Sync', 'Sincronización completa.');
     } catch (e) {
       console.error('❌ Error en sincronización manual:', e);
@@ -168,14 +168,6 @@ export default function App() {
       setIsSyncLoading(false);
     }
   }, [refresh]);
-
-  if (!ready) {
-    return (
-      <SafeAreaView style={styles.center}>
-        <Text>Inicializando base de datos...</Text>
-      </SafeAreaView>
-    );
-  }
 
   const handleOpenNewProductFromSale = useCallback((barcode) => {
     setSaleRequestedBarcode(String(barcode));
@@ -212,6 +204,14 @@ export default function App() {
       </View>
     );
   }, [isCompact, onDelete, onEdit]);
+
+  if (!ready) {
+    return (
+      <SafeAreaView style={styles.center}>
+        <Text>Inicializando base de datos...</Text>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.bg }]}>
