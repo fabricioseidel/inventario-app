@@ -7,13 +7,38 @@ function rowsToArray(res){ const a=[]; for(let i=0;i<res.rows.length;i++) a.push
 
 // ---------- MIGRACIONES ----------
 function ensureColumnsInTable(tx, table, columnDefs, done){
-  tx.executeSql(`PRAGMA table_info(${table});`, [], (_,_res)=>{
-    const existing = new Set(); for(let i=0;i<_res.rows.length;i++) existing.add(_res.rows.item(i).name);
-    const toAdd = columnDefs.filter(c=>!existing.has(c.name));
-    const run=(i)=>{ if(i>=toAdd.length) return done&&done(); const c=toAdd[i];
-      tx.executeSql(`ALTER TABLE ${table} ADD COLUMN ${c.name} ${c.def};`, [], ()=>run(i+1), ()=>run(i+1));
-    }; run(0);
-  }, ()=>{ done&&done(); return true; });
+  tx.executeSql(
+    `SELECT name FROM sqlite_master WHERE type='table' AND name=?;`,
+    [table],
+    (_,_tableRes)=>{
+      if(!_tableRes.rows.length){
+        done && done();
+        return;
+      }
+
+      tx.executeSql(`PRAGMA table_info(${table});`, [], (_,_res)=>{
+        const existing = new Set();
+        for(let i=0;i<_res.rows.length;i++) existing.add(_res.rows.item(i).name);
+
+        const toAdd = columnDefs.filter(c=>!existing.has(c.name));
+        const run=(i)=>{
+          if(i>=toAdd.length){
+            done && done();
+            return;
+          }
+          const c=toAdd[i];
+          tx.executeSql(
+            `ALTER TABLE ${table} ADD COLUMN ${c.name} ${c.def};`,
+            [],
+            ()=>run(i+1),
+            (_,_err)=>{ console.warn(`⚠️ No se pudo agregar columna ${c.name} en ${table}:`, _err?.message); run(i+1); return true; }
+          );
+        };
+        run(0);
+      }, ()=>{ done&&done(); return true; });
+    },
+    ()=>{ done&&done(); return true; }
+  );
 }
 
 function migrateSalesSchema(tx, done){
