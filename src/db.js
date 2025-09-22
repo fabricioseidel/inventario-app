@@ -7,13 +7,38 @@ function rowsToArray(res){ const a=[]; for(let i=0;i<res.rows.length;i++) a.push
 
 // ---------- MIGRACIONES ----------
 function ensureColumnsInTable(tx, table, columnDefs, done){
-  tx.executeSql(`PRAGMA table_info(${table});`, [], (_,_res)=>{
-    const existing = new Set(); for(let i=0;i<_res.rows.length;i++) existing.add(_res.rows.item(i).name);
-    const toAdd = columnDefs.filter(c=>!existing.has(c.name));
-    const run=(i)=>{ if(i>=toAdd.length) return done&&done(); const c=toAdd[i];
-      tx.executeSql(`ALTER TABLE ${table} ADD COLUMN ${c.name} ${c.def};`, [], ()=>run(i+1), ()=>run(i+1));
-    }; run(0);
-  }, ()=>{ done&&done(); return true; });
+  tx.executeSql(
+    `SELECT name FROM sqlite_master WHERE type='table' AND name=?;`,
+    [table],
+    (_,_tableRes)=>{
+      if(!_tableRes.rows.length){
+        done && done();
+        return;
+      }
+
+      tx.executeSql(`PRAGMA table_info(${table});`, [], (_,_res)=>{
+        const existing = new Set();
+        for(let i=0;i<_res.rows.length;i++) existing.add(_res.rows.item(i).name);
+
+        const toAdd = columnDefs.filter(c=>!existing.has(c.name));
+        const run=(i)=>{
+          if(i>=toAdd.length){
+            done && done();
+            return;
+          }
+          const c=toAdd[i];
+          tx.executeSql(
+            `ALTER TABLE ${table} ADD COLUMN ${c.name} ${c.def};`,
+            [],
+            ()=>run(i+1),
+            (_,_err)=>{ console.warn(`⚠️ No se pudo agregar columna ${c.name} en ${table}:`, _err?.message); run(i+1); return true; }
+          );
+        };
+        run(0);
+      }, ()=>{ done&&done(); return true; });
+    },
+    ()=>{ done&&done(); return true; }
+  );
 }
 
 function migrateSalesSchema(tx, done){
@@ -78,6 +103,13 @@ function migrateProductsWeight(tx, done){
   }, ()=>{ done&&done(); return true; });
 }
 
+function migrateProductImages(tx, done){
+  const cols = [
+    { name: 'image_uri', def: 'TEXT' },
+  ];
+  ensureColumnsInTable(tx, 'products', cols, ()=> done && done());
+}
+
 function migrateSaleItemsQty(tx, done){
   tx.executeSql(`PRAGMA table_info(sale_items);`, [], (_,_r)=>{
     let qtyType='REAL';
@@ -107,6 +139,16 @@ function migrateSaleItemsQty(tx, done){
   }, ()=>{ done&&done(); return true; });
 }
 
+function migrateSaleTransferProof(tx, done){
+  const cols = [
+    { name: 'transfer_receipt_uri', def: 'TEXT' },
+    { name: 'transfer_receipt_name', def: 'TEXT' },
+  ];
+  ensureColumnsInTable(tx, 'sales', cols, ()=>
+    ensureColumnsInTable(tx, 'sale', cols, ()=> done && done())
+  );
+}
+
 // ---------- INIT ----------
 export function initDB(){
   return new Promise((resolve,reject)=>{
@@ -123,6 +165,7 @@ export function initDB(){
         expiry_date TEXT,
         stock REAL DEFAULT 0,
         sold_by_weight INTEGER DEFAULT 0,
+        image_uri TEXT,
         updated_at INTEGER
       );`);
       tx.executeSql(`CREATE INDEX IF NOT EXISTS idx_products_barcode ON products(barcode);`);
@@ -145,6 +188,8 @@ export function initDB(){
         discount REAL DEFAULT 0,
         tax REAL DEFAULT 0,
         notes TEXT,
+        transfer_receipt_uri TEXT,
+        transfer_receipt_name TEXT,
         voided INTEGER DEFAULT 0
       );`);
       tx.executeSql(`CREATE TABLE IF NOT EXISTS sale_items(
@@ -162,7 +207,9 @@ export function initDB(){
       tx.executeSql(`CREATE TABLE IF NOT EXISTS sale(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         ts INTEGER NOT NULL,
-        total REAL NOT NULL
+        total REAL NOT NULL,
+        transfer_receipt_uri TEXT,
+        transfer_receipt_name TEXT
       );`);
 
       // templates (legacy, si existe tu editor)
@@ -181,6 +228,8 @@ export function initDB(){
       migrateCloudOutbox(tx, ()=>{});
       migrateProductsWeight(tx, ()=>{});
       migrateSaleItemsQty(tx, ()=>{});
+      migrateProductImages(tx, ()=>{});
+      migrateSaleTransferProof(tx, ()=>{});
     }, reject, ()=>resolve(true));
   });
 }
@@ -195,19 +244,20 @@ export function insertOrUpdateProduct(p){
     sale_price:Number(p.salePrice ?? p.sale_price ?? 0)||0,
     expiry_date:p.expiryDate ?? p.expiry_date ?? null,
     stock:Number(p.stock ?? 0)||0,
-    sold_by_weight:Number(p.sold_by_weight ?? p.soldByWeight ?? 0)||0
+    sold_by_weight:Number(p.sold_by_weight ?? p.soldByWeight ?? 0)||0,
+    image_uri:p.imageUri ?? p.image_uri ?? null,
   };
   if(!payload.barcode) return Promise.reject(new Error('barcode requerido'));
   return new Promise((resolve,reject)=>{
     db().transaction((tx)=>{
       tx.executeSql(
-        `INSERT INTO products (barcode,name,category,purchase_price,sale_price,expiry_date,stock,sold_by_weight,updated_at)
-         VALUES (?,?,?,?,?,?,?,?,?)
+        `INSERT INTO products (barcode,name,category,purchase_price,sale_price,expiry_date,stock,sold_by_weight,image_uri,updated_at)
+         VALUES (?,?,?,?,?,?,?,?,?,?)
          ON CONFLICT(barcode) DO UPDATE SET
            name=excluded.name, category=excluded.category,
            purchase_price=excluded.purchase_price, sale_price=excluded.sale_price,
-           expiry_date=excluded.expiry_date, stock=excluded.stock, sold_by_weight=excluded.sold_by_weight, updated_at=excluded.updated_at;`,
-        [payload.barcode,payload.name,payload.category,payload.purchase_price,payload.sale_price,payload.expiry_date,payload.stock,payload.sold_by_weight,now]
+           expiry_date=excluded.expiry_date, stock=excluded.stock, sold_by_weight=excluded.sold_by_weight, image_uri=excluded.image_uri, updated_at=excluded.updated_at;`,
+        [payload.barcode,payload.name,payload.category,payload.purchase_price,payload.sale_price,payload.expiry_date,payload.stock,payload.sold_by_weight,payload.image_uri,now]
       );
     }, reject, ()=>resolve(true));
   });
@@ -219,13 +269,13 @@ export function upsertProductsBulk(list){
     db().transaction((tx)=>{
       (list||[]).forEach(p=>{
         tx.executeSql(
-          `INSERT INTO products (barcode,name,category,purchase_price,sale_price,expiry_date,stock,sold_by_weight,updated_at)
-           VALUES (?,?,?,?,?,?,?,?,?)
+          `INSERT INTO products (barcode,name,category,purchase_price,sale_price,expiry_date,stock,sold_by_weight,image_uri,updated_at)
+           VALUES (?,?,?,?,?,?,?,?,?,?)
            ON CONFLICT(barcode) DO UPDATE SET
             name=excluded.name, category=excluded.category,
             purchase_price=excluded.purchase_price, sale_price=excluded.sale_price,
-            expiry_date=excluded.expiry_date, stock=excluded.stock, sold_by_weight=excluded.sold_by_weight, updated_at=?;`,
-          [p.barcode, p.name, p.category, p.purchase_price||0, p.sale_price||0, p.expiry_date||null, p.stock||0, p.sold_by_weight||0, now, now]
+            expiry_date=excluded.expiry_date, stock=excluded.stock, sold_by_weight=excluded.sold_by_weight, image_uri=excluded.image_uri, updated_at=?;`,
+          [p.barcode, p.name, p.category, p.purchase_price||0, p.sale_price||0, p.expiry_date||null, p.stock||0, p.sold_by_weight||0, p.image_uri ?? p.imageUri ?? null, now, now]
         );
       });
     }, reject, ()=>resolve(true));
@@ -280,7 +330,8 @@ export function exportAllProductsOrdered(){
         `SELECT barcode, barcode AS id, IFNULL(name,'') AS name, IFNULL(category,'') AS category,
                 IFNULL(purchase_price,0) AS purchasePrice, IFNULL(sale_price,0) AS salePrice,
                 IFNULL(expiry_date,'') AS expiryDate, IFNULL(stock,0) AS stock,
-                IFNULL(sold_by_weight,0) AS soldByWeight
+                IFNULL(sold_by_weight,0) AS soldByWeight,
+                IFNULL(image_uri,'') AS imageUri
          FROM products ORDER BY name ASC, id DESC;`,
         [], (_,_r)=>resolve(rowsToArray(_r))
       );
@@ -316,6 +367,8 @@ export function recordSale(cart, opts = {}){
   const cashReceived = Number(opts.amountPaid||0)||0;
   const change = Math.max(0, cashReceived - total);
   const notes = opts.note || null;
+  const transferUri = opts.transferReceiptUri || null;
+  const transferName = opts.transferReceiptName || null;
 
   const clientSaleId = `local-${ts}-${Math.random().toString(36).slice(2,8)}`;
 
@@ -323,9 +376,9 @@ export function recordSale(cart, opts = {}){
     let firstError=null;
     db().transaction((tx)=>{
       tx.executeSql(
-        `INSERT INTO sales (ts,total,payment_method,cash_received,change_given,discount,tax,notes,voided)
-         VALUES (?,?,?,?,?,?,?, ?, 0);`,
-        [ts,total,payment,cashReceived,change,discount,tax,notes],
+        `INSERT INTO sales (ts,total,payment_method,cash_received,change_given,discount,tax,notes,transfer_receipt_uri,transfer_receipt_name,voided)
+         VALUES (?,?,?,?,?,?,?,?,?,?,0);`,
+        [ts,total,payment,cashReceived,change,discount,tax,notes,transferUri,transferName],
         (_insert,res)=>{
           const saleId = res.insertId;
 
@@ -353,8 +406,17 @@ export function recordSale(cart, opts = {}){
 
           // Encolar para sync
           const payload = {
-            total, payment_method:payment, cash_received:cashReceived, change_given:change,
-            discount, tax, notes, client_sale_id: clientSaleId, items: itemsJson
+            total,
+            payment_method:payment,
+            cash_received:cashReceived,
+            change_given:change,
+            discount,
+            tax,
+            notes,
+            transfer_receipt_uri: transferUri,
+            transfer_receipt_name: transferName,
+            client_sale_id: clientSaleId,
+            items: itemsJson
           };
           tx.executeSql(
             `INSERT OR IGNORE INTO outbox_sales (local_sale_id, client_sale_id, payload_json, synced, created_at)
@@ -380,6 +442,8 @@ export function insertSaleFromCloud(payload){
   const discount = Number(payload?.discount || 0) || 0;
   const tax = Number(payload?.tax || 0) || 0;
   const notes = payload?.notes || null;
+  const transferUri = payload?.transfer_receipt_uri ?? payload?.transferReceiptUri ?? null;
+  const transferName = payload?.transfer_receipt_name ?? payload?.transferReceiptName ?? null;
 
   return new Promise((resolve,reject)=>{
     let firstError=null;
@@ -397,9 +461,9 @@ export function insertSaleFromCloud(payload){
           
           // No existe, proceder con la inserción
           tx.executeSql(
-            `INSERT INTO sales (ts,total,payment_method,cash_received,change_given,discount,tax,notes,voided)
-             VALUES (?,?,?,?,?,?,?, ?, 0);`,
-            [ts,total,payment,cashReceived,change,discount,tax,notes],
+            `INSERT INTO sales (ts,total,payment_method,cash_received,change_given,discount,tax,notes,transfer_receipt_uri,transfer_receipt_name,voided)
+             VALUES (?,?,?,?,?,?,?,?,?,?,0);`,
+            [ts,total,payment,cashReceived,change,discount,tax,notes,transferUri,transferName],
             (_insert,res)=>{
               const saleId = res.insertId;
               console.log(`✅ Venta desde cloud insertada: saleId=${saleId}, ts=${ts}, total=${total}`);
@@ -459,7 +523,7 @@ export function listSalesBetween(fromTs,toTs){
     if(typeof fromTs==='number'){ where+=' AND ts >= ?'; params.push(fromTs); }
     if(typeof toTs==='number'){ where+=' AND ts <= ?'; params.push(toTs); }
     db().transaction((tx)=>{
-      tx.executeSql(`SELECT id,ts,total,payment_method,cash_received,change_given,discount,tax,voided FROM sales ${where} ORDER BY ts DESC;`,
+      tx.executeSql(`SELECT id,ts,total,payment_method,cash_received,change_given,discount,tax,voided,transfer_receipt_uri,transfer_receipt_name FROM sales ${where} ORDER BY ts DESC;`,
         params, (_,_r)=>resolve(rowsToArray(_r)));
     }, reject);
   });
@@ -536,7 +600,8 @@ export function getUnsyncedSales(){
     db().transaction((tx)=>{
       tx.executeSql(
         `SELECT o.id as outbox_id, o.local_sale_id, o.client_sale_id, o.payload_json,
-                s.total, s.payment_method, s.cash_received, s.change_given, s.discount, s.tax, s.notes
+                s.total, s.payment_method, s.cash_received, s.change_given, s.discount, s.tax, s.notes,
+                s.transfer_receipt_uri, s.transfer_receipt_name
            FROM outbox_sales o
            JOIN sales s ON s.id=o.local_sale_id
           WHERE o.synced=0
@@ -554,7 +619,9 @@ export function getUnsyncedSales(){
             change_given: r.change_given,
             discount: r.discount,
             tax: r.tax,
-            notes: r.notes
+            notes: r.notes,
+            transfer_receipt_uri: r.transfer_receipt_uri,
+            transfer_receipt_name: r.transfer_receipt_name
           }));
           resolve(list);
         }

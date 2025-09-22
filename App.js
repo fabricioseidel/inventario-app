@@ -1,9 +1,10 @@
 // App.js
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   SafeAreaView, View, Text, FlatList, StyleSheet, Alert, Modal,
-  TextInput, TouchableOpacity, Keyboard, Platform
+  TextInput, TouchableOpacity, Keyboard, Platform, Image, useWindowDimensions
 } from 'react-native';
+import { InteractionManager } from 'react-native';
 
 import { initDB, listProducts, deleteProductByBarcode } from './src/db';
 import ProductForm from './src/screens/ProductForm';
@@ -23,7 +24,7 @@ import { syncNow, initRealtimeSync } from './src/sync';
 
 export default function App() {
   const [ready, setReady] = useState(false);
-  const [tab, setTab] = useState('inventory');
+  const [tab, setTab] = useState('sales');
 
   const [products, setProducts] = useState([]);
   const [search, setSearch] = useState('');
@@ -35,6 +36,20 @@ export default function App() {
   const [openQuickScan, setOpenQuickScan] = useState(false);
   const [isSyncLoading, setIsSyncLoading] = useState(false);
   const [lastSyncTime, setLastSyncTime] = useState(Date.now());
+  const [saleRequestedBarcode, setSaleRequestedBarcode] = useState(null);
+  const [recentlyCreatedBarcode, setRecentlyCreatedBarcode] = useState(null);
+
+  const { width } = useWindowDimensions();
+  const isCompact = width < 380;
+
+  const refresh = useCallback(async () => {
+    try {
+      const rows = await listProducts();
+      setProducts(rows);
+    } catch {
+      Alert.alert('Error', 'No se pudo cargar el listado');
+    }
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -43,9 +58,10 @@ export default function App() {
         await refresh();
         setReady(true);
 
-        // Auto-sync al iniciar (si hay internet)
-        try { await syncNow(); await refresh(); } catch {}
-        initRealtimeSync();
+        InteractionManager.runAfterInteractions(async () => {
+          try { await syncNow(); await refresh(); } catch {}
+          initRealtimeSync();
+        });
       } catch {
         Alert.alert('Error', 'Fallo al inicializar la base de datos');
       }
@@ -56,16 +72,7 @@ export default function App() {
       try { await syncNow(); await refresh(); } catch {}
     }, 5 * 60 * 1000);
     return () => clearInterval(id);
-  }, []);
-
-  const refresh = async () => {
-    try {
-      const rows = await listProducts();
-      setProducts(rows);
-    } catch {
-      Alert.alert('Error', 'No se pudo cargar el listado');
-    }
-  };
+  }, [refresh]);
 
   const norm = (s) =>
     String(s || '')
@@ -83,8 +90,12 @@ export default function App() {
     );
   }, [products, search]);
 
-  const onCreate = () => { setEditing(null); setOpenForm(true); };
-  const onEdit = (item) => {
+  const onCreate = useCallback(() => {
+    setSaleRequestedBarcode(null);
+    setEditing(null);
+    setOpenForm(true);
+  }, []);
+  const onEdit = useCallback((item) => {
     const mapped = {
       barcode: item.barcode,
       name: item.name || '',
@@ -93,11 +104,13 @@ export default function App() {
       salePrice: String(item.sale_price ?? ''),
       expiryDate: item.expiry_date || '',
       stock: String(item.stock ?? ''),
+      imageUri: item.image_uri || null,
     };
+    setSaleRequestedBarcode(null);
     setEditing(mapped);
     setOpenForm(true);
-  };
-  const onDelete = (item) => {
+  }, []);
+  const onDelete = useCallback((item) => {
     Alert.alert('Confirmar', `¿Eliminar producto ${item.barcode}?`, [
       { text: 'Cancelar', style: 'cancel' },
       {
@@ -107,9 +120,9 @@ export default function App() {
         }
       }
     ]);
-  };
+  }, [refresh]);
 
-  const manualSync = async () => {
+  const manualSync = useCallback(async () => {
     setIsSyncLoading(true);
     try {
       console.log('🔄 Iniciando sincronización manual...');
@@ -128,7 +141,7 @@ export default function App() {
     } finally {
       setIsSyncLoading(false);
     }
-  };
+  }, [refresh]);
 
   if (!ready) {
     return (
@@ -138,20 +151,56 @@ export default function App() {
     );
   }
 
+  const handleOpenNewProductFromSale = useCallback((barcode) => {
+    setSaleRequestedBarcode(String(barcode));
+    setEditing({ barcode: String(barcode) });
+    setOpenForm(true);
+  }, []);
+
+  const consumeRecentProduct = useCallback(() => {
+    setRecentlyCreatedBarcode(null);
+    setSaleRequestedBarcode(null);
+  }, []);
+
+  const renderProduct = useCallback(({ item }) => {
+    return (
+      <View style={[styles.card, isCompact && styles.cardCompact]}>
+        {item.image_uri ? (
+          <Image
+            source={{ uri: item.image_uri }}
+            style={[styles.cardImage, isCompact && styles.cardImageCompact]}
+            resizeMode="cover"
+          />
+        ) : null}
+        <View style={{ flex: 1 }}>
+          <Text style={styles.cardTitle}>{item.name || '(Sin nombre)'}</Text>
+          <Text style={styles.cardLine}>{item.category || 'Sin categoría'}</Text>
+          <Text style={styles.cardLine}>Código: {item.barcode}</Text>
+          <Text style={styles.cardLine}>Compra: ${item.purchase_price ?? 0} · Venta: ${item.sale_price ?? 0}</Text>
+          <Text style={styles.cardLine}>Vence: {item.expiry_date || '—'} · Stock: {item.stock ?? 0}</Text>
+        </View>
+        <View style={[styles.cardActions, isCompact && styles.cardActionsCompact]}>
+          <TouchableOpacity style={styles.smallBtn} onPress={() => onEdit(item)}><Text style={styles.smallBtnTxt}>Editar</Text></TouchableOpacity>
+          <TouchableOpacity style={[styles.smallBtn, { backgroundColor: '#fde7ea', borderColor: '#f4b4bf' }]} onPress={() => onDelete(item)}><Text style={[styles.smallBtnTxt, { color: '#b00020' }]}>Eliminar</Text></TouchableOpacity>
+        </View>
+      </View>
+    );
+  }, [isCompact, onDelete, onEdit]);
+
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.bg }]}>
       <Header
         title="OlivoMarket"
-        subtitle={tab === 'inventory' ? 'Inventario y productos' : tab === 'sales' ? 'Caja y ventas' : 'Reportes y tendencias'}
+        subtitle={tab === 'sales' ? 'Caja y ventas' : tab === 'inventory' ? 'Inventario y productos' : 'Reportes y tendencias'}
       />
       <TopTabs
-        tabs={[{ key: 'inventory', label: 'Inventario' }, { key: 'sales', label: 'Ventas' }, { key: 'reports', label: 'Reportes' }]}
+        tabs={[{ key: 'sales', label: 'Ventas' }, { key: 'inventory', label: 'Inventario' }, { key: 'reports', label: 'Reportes' }]}
         current={tab}
         onChange={setTab}
       />
 
       {tab === 'inventory' && (
-        <View style={styles.content}>
+        <View style={[styles.content, isCompact && { paddingHorizontal: 12 }] }>
           <View style={styles.searchRow}>
             <TextInput
               style={styles.input}
@@ -195,36 +244,33 @@ export default function App() {
             keyExtractor={(item) => String(item.id)}
             keyboardShouldPersistTaps="handled"
             contentContainerStyle={{ paddingBottom: 120 }}
-            renderItem={({ item }) => (
-              <View style={styles.card}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.cardTitle}>{item.name || '(Sin nombre)'}</Text>
-                  <Text style={styles.cardLine}>{item.category || 'Sin categoría'}</Text>
-                  <Text style={styles.cardLine}>Código: {item.barcode}</Text>
-                  <Text style={styles.cardLine}>Compra: ${item.purchase_price ?? 0} · Venta: ${item.sale_price ?? 0}</Text>
-                  <Text style={styles.cardLine}>Vence: {item.expiry_date || '—'} · Stock: {item.stock ?? 0}</Text>
-                </View>
-                <View style={styles.cardActions}>
-                  <TouchableOpacity style={styles.smallBtn} onPress={() => onEdit(item)}><Text style={styles.smallBtnTxt}>Editar</Text></TouchableOpacity>
-                  <TouchableOpacity style={[styles.smallBtn, { backgroundColor: '#fde7ea', borderColor: '#f4b4bf' }]} onPress={() => onDelete(item)}><Text style={[styles.smallBtnTxt, { color: '#b00020' }]}>Eliminar</Text></TouchableOpacity>
-                </View>
-              </View>
-            )}
+            renderItem={renderProduct}
             ListEmptyComponent={<Text style={styles.emptyText}>{search ? 'Sin resultados para tu búsqueda' : 'No hay productos'}</Text>}
+            initialNumToRender={10}
+            maxToRenderPerBatch={10}
+            windowSize={6}
+            removeClippedSubviews
           />
 
           <FAB
             items={[
               { icon: '📷', label: 'Escanear', onPress: () => setOpenQuickScan(true) },
-              { icon: '➕', label: 'Nuevo', onPress: () => setOpenForm(true) },
+              { icon: '➕', label: 'Nuevo', onPress: onCreate },
             ]}
           />
         </View>
       )}
 
       {tab === 'sales' && (
-        <View style={styles.content}>
-          <SellScreen onClose={() => {}} onSold={async ()=>{ await refresh(); try{ await syncNow(); } catch{} }} />
+        <View style={[styles.content, isCompact && { paddingHorizontal: 12 }] }>
+          <SellScreen
+            onClose={() => {}}
+            onSold={async ()=>{ await refresh(); try{ await syncNow(); } catch{} }}
+            onRequestCreateProduct={handleOpenNewProductFromSale}
+            pendingBarcode={saleRequestedBarcode}
+            recentlyCreatedBarcode={recentlyCreatedBarcode}
+            onConsumeRecentBarcode={consumeRecentProduct}
+          />
         </View>
       )}
 
@@ -257,13 +303,17 @@ export default function App() {
       )}
 
       {/* Modales */}
-      <Modal visible={openForm} animationType="slide" onRequestClose={() => setOpenForm(false)}>
+      <Modal visible={openForm} animationType="slide" onRequestClose={() => { setOpenForm(false); setSaleRequestedBarcode(null); }}>
         <SafeAreaView style={{ flex: 1, backgroundColor: '#fff' }}>
           <Header title="Producto" subtitle={editing ? 'Editar' : 'Crear nuevo'} compact />
           <ProductForm
             initial={editing}
-            onSaved={async () => { setOpenForm(false); await refresh(); }}
-            onCancel={() => setOpenForm(false)}
+            onSaved={async (barcode) => {
+              setOpenForm(false);
+              await refresh();
+              setRecentlyCreatedBarcode(barcode || null);
+            }}
+            onCancel={() => { setOpenForm(false); setSaleRequestedBarcode(null); }}
           />
         </SafeAreaView>
       </Modal>
@@ -323,9 +373,13 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: '#ececec',
     shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 6, shadowOffset: { width: 0, height: 2 }, elevation: 1,
   },
+  cardCompact: { flexDirection: 'column', alignItems: 'stretch' },
+  cardImage: { width: 72, height: 72, borderRadius: 12, backgroundColor: '#f5f5f5' },
+  cardImageCompact: { width: '100%', height: 160, borderRadius: 14, marginBottom: 8 },
   cardTitle: { fontWeight: '700', fontSize: 16, marginBottom: 2 },
   cardLine: { color: '#555' },
-  cardActions: { gap: 6 },
+  cardActions: { gap: 6, flexDirection: 'column', alignItems: 'flex-end' },
+  cardActionsCompact: { flexDirection: 'row', justifyContent: 'flex-end', marginTop: 12 },
   smallBtn: { borderWidth: 1, borderColor: '#d8e7ff', backgroundColor: '#eef6ff', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, alignItems: 'center' },
   smallBtnTxt: { color: '#0b5', fontWeight: '700' },
   emptyText: { color: '#888', textAlign: 'center', marginTop: 24 },

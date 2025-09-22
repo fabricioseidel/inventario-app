@@ -19,7 +19,7 @@ export default function TopTabs({ tabs, current, onChange }) {
 }
 
 const styles = StyleSheet.create({
-  wrap: { flexDirection: 'row', gap: 8, backgroundColor: '#fff', paddingHorizontal: 8, paddingVertical: 8, borderBottomWidth: 1, borderColor: theme.colors.divider },
+  wrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, backgroundColor: '#fff', paddingHorizontal: 8, paddingVertical: 8, borderBottomWidth: 1, borderColor: theme.colors.divider },
   tab: { flex: 1, borderWidth: 1, borderColor: theme.colors.divider, backgroundColor: '#fff', borderRadius: 999, paddingVertical: 8, alignItems: 'center' },
   tabActive: { backgroundColor: theme.colors.tabActive, borderColor: theme.colors.tabActive },
   tabText: { color: theme.colors.tabInactive, fontWeight: '700' },

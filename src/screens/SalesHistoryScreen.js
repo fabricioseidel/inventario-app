@@ -1,6 +1,6 @@
 // src/screens/SalesHistoryScreen.js
 import React, { useEffect, useMemo, useState } from 'react';
-import { View, Text, Button, FlatList, Modal, SafeAreaView, TouchableOpacity, StyleSheet, ActivityIndicator, Alert } from 'react-native';
+import { View, Text, Button, FlatList, Modal, SafeAreaView, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, Image } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
@@ -26,6 +26,7 @@ export default function SalesHistoryScreen({ onClose, refreshKey }) {
   const [detail, setDetail] = useState(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const [methods, setMethods] = useState(new Set());
+  const [proofPreview, setProofPreview] = useState(null);
 
   useEffect(()=> {
     const today=new Date();
@@ -80,11 +81,27 @@ export default function SalesHistoryScreen({ onClose, refreshKey }) {
     try {
       setLoading(true);
       const data = await getSaleWithItems(saleId);
+      setProofPreview(null);
       setDetail(data);
       setDetailOpen(true);
     } catch { Alert.alert('Error', 'No se pudo cargar el detalle.'); }
     finally { setLoading(false); }
   };
+
+  const shareProof = async (uri) => {
+    if (!uri) return;
+    try {
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(uri);
+      } else {
+        Alert.alert('Compartir', 'La opción de compartir no está disponible en este dispositivo.');
+      }
+    } catch (e) {
+      Alert.alert('Error', 'No se pudo compartir el comprobante.');
+    }
+  };
+
+  const hasImageProof = (uri) => /\.(png|jpg|jpeg|heic|heif|webp)$/i.test(String(uri || ''));
 
   const doExportCSV = async () => {
     try {
@@ -109,6 +126,7 @@ export default function SalesHistoryScreen({ onClose, refreshKey }) {
           setLoading(true);
           await voidSale(detail.sale.id);
           setDetailOpen(false);
+          setProofPreview(null);
           const rows = await listSalesBetween(dStart.getTime(), dEnd.getTime());
           setSales(rows);
           Alert.alert('Listo','Venta anulada y stock repuesto.');
@@ -121,7 +139,9 @@ export default function SalesHistoryScreen({ onClose, refreshKey }) {
   const renderSale = ({ item }) => (
     <TouchableOpacity style={styles.saleRow} onPress={() => openDetail(item.id)}>
       <View style={{ flex: 1 }}>
-        <Text style={styles.saleTitle}>${Number(item.total).toFixed(0)} · {item.payment_method || '—'}</Text>
+        <Text style={styles.saleTitle}>
+          ${Number(item.total).toFixed(0)} · {item.payment_method || '—'} {item.transfer_receipt_uri ? '📎' : ''}
+        </Text>
         <Text style={styles.saleSub}>{fmt(item.ts)}</Text>
       </View>
       <Text style={styles.saleGo}>›</Text>
@@ -197,7 +217,7 @@ export default function SalesHistoryScreen({ onClose, refreshKey }) {
       </View>
 
       {/* Detalle */}
-      <Modal visible={detailOpen} animationType="slide" onRequestClose={()=>setDetailOpen(false)}>
+      <Modal visible={detailOpen} animationType="slide" onRequestClose={()=>{ setDetailOpen(false); setProofPreview(null); }}>
         <SafeAreaView style={{ flex:1, backgroundColor:'#fff', padding:16 }}>
           <Text style={styles.title}>Detalle de venta</Text>
           {detail ? (
@@ -219,13 +239,46 @@ export default function SalesHistoryScreen({ onClose, refreshKey }) {
                 )}
                 ListEmptyComponent={<Text style={{ color:'#888' }}>Sin ítems</Text>}
               />
+              {detail.sale.transfer_receipt_uri && (
+                <View style={styles.proofCard}>
+                  <Text style={{ fontWeight:'700', marginBottom:6 }}>Comprobante adjunto</Text>
+                  {detail.sale.transfer_receipt_name ? (
+                    <Text style={styles.proofName}>{detail.sale.transfer_receipt_name}</Text>
+                  ) : null}
+                  {hasImageProof(detail.sale.transfer_receipt_uri) ? (
+                    <TouchableOpacity onPress={() => setProofPreview(detail.sale.transfer_receipt_uri)}>
+                      <Image source={{ uri: detail.sale.transfer_receipt_uri }} style={styles.proofImage} />
+                    </TouchableOpacity>
+                  ) : (
+                    <View style={styles.proofPlaceholder}><Text style={{ fontSize:18 }}>📄</Text></View>
+                  )}
+                  <View style={{ flexDirection:'row', gap:8, marginTop:8 }}>
+                    <TouchableOpacity style={styles.proofBtn} onPress={() => shareProof(detail.sale.transfer_receipt_uri)}>
+                      <Text style={styles.proofBtnTxt}>Compartir</Text>
+                    </TouchableOpacity>
+                    {hasImageProof(detail.sale.transfer_receipt_uri) && (
+                      <TouchableOpacity style={styles.proofBtn} onPress={() => setProofPreview(detail.sale.transfer_receipt_uri)}>
+                        <Text style={styles.proofBtnTxt}>Ver grande</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                </View>
+              )}
               <View style={{ height:8 }} />
               <Button title="Anular venta (reponer stock)" color={theme.colors.danger} onPress={doVoid} />
               <View style={{ height:8 }} />
-              <Button title="Cerrar" onPress={()=>setDetailOpen(false)} />
+              <Button title="Cerrar" onPress={()=>{ setDetailOpen(false); setProofPreview(null); }} />
             </>
           ) : <ActivityIndicator/>}
         </SafeAreaView>
+      </Modal>
+
+      <Modal visible={!!proofPreview} transparent animationType="fade" onRequestClose={()=>setProofPreview(null)}>
+        <View style={styles.previewBg}>
+          <TouchableOpacity style={{ flex:1 }} activeOpacity={1} onPress={()=>setProofPreview(null)}>
+            {proofPreview && <Image source={{ uri: proofPreview }} style={styles.previewImage} resizeMode="contain" />}
+          </TouchableOpacity>
+        </View>
       </Modal>
     </SafeAreaView>
   );
@@ -248,4 +301,12 @@ const styles = StyleSheet.create({
   saleGo:{ fontSize:22, color:'#999', marginLeft:8 },
   itemRow:{ flexDirection:'row', alignItems:'center', justifyContent:'space-between', paddingVertical:8, borderBottomWidth:1, borderColor:'#eee' },
   clearBtn:{ borderWidth:1, borderColor:'#e6e6e6', paddingHorizontal:12, paddingVertical:6, borderRadius:999, backgroundColor:'#fff' },
+  proofCard:{ borderWidth:1, borderColor:'#eee', borderRadius:12, padding:12, backgroundColor:'#fafafa', marginTop:12, alignItems:'flex-start', gap:8 },
+  proofName:{ fontWeight:'600', color:'#333' },
+  proofImage:{ width:120, height:120, borderRadius:12 },
+  proofPlaceholder:{ width:120, height:120, borderRadius:12, backgroundColor:'#eef1ff', alignItems:'center', justifyContent:'center' },
+  proofBtn:{ borderWidth:1, borderColor:'#ddd', borderRadius:10, paddingHorizontal:12, paddingVertical:6, backgroundColor:'#fff' },
+  proofBtnTxt:{ fontWeight:'600', color:theme.colors.primary },
+  previewBg:{ flex:1, backgroundColor:'rgba(0,0,0,0.8)', alignItems:'center', justifyContent:'center', padding:20 },
+  previewImage:{ width:'100%', height:'100%' },
 });
