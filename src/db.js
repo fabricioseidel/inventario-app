@@ -254,17 +254,19 @@ export function initDB(){
         ];
         
         if (index >= migrations.length) {
+          console.log('✅ Todas las migraciones completadas exitosamente');
           doneCb();
           return;
         }
         
         try {
+          console.log(`🔄 Ejecutando migración ${index + 1}/${migrations.length}...`);
           migrations[index](function() {
             // Ejecutar la siguiente migración inmediatamente para mantenernos dentro de la misma transacción.
             runMigrations(index + 1, doneCb);
           });
         } catch (err) {
-          console.warn(`Error en migración ${index}:`, err);
+          console.warn(`⚠️ Error en migración ${index}:`, err);
           runMigrations(index + 1, doneCb);
         }
       };

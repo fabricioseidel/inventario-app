@@ -5,8 +5,6 @@ import {
   TextInput, TouchableOpacity, Keyboard, Platform, Image, useWindowDimensions
 } from 'react-native';
 import { InteractionManager } from 'react-native';
-// Aseguramos que todos los hooks se importan correctamente
-import * as React from 'react';
 
 import { initDB, listProducts, deleteProductByBarcode } from './src/db';
 import ProductForm from './src/screens/ProductForm';
