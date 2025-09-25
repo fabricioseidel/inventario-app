@@ -54,6 +54,48 @@ function migrateSalesSchema(tx, done){
   ensureColumnsInTable(tx, 'sales', cols, ()=> ensureColumnsInTable(tx, 'sale', cols, ()=> done&&done()));
 }
 
+function migrateCashManagement(tx, done){
+  // Crear tablas de manejo de caja
+  tx.executeSql(`
+    CREATE TABLE IF NOT EXISTS cash_sessions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      start_date TEXT NOT NULL,
+      end_date TEXT,
+      opening_amount REAL NOT NULL,
+      expected_amount REAL,
+      actual_amount REAL,
+      difference REAL,
+      opened_by TEXT NOT NULL,
+      closed_by TEXT,
+      notes TEXT,
+      status TEXT DEFAULT 'open'
+    );
+  `, [], 
+  () => tx.executeSql(`
+    CREATE TABLE IF NOT EXISTS safe_movements (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      type TEXT NOT NULL,
+      amount REAL NOT NULL,
+      description TEXT NOT NULL,
+      session_id INTEGER,
+      created_by TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (session_id) REFERENCES cash_sessions(id)
+    );
+  `, [],
+  () => tx.executeSql(`
+    CREATE TABLE IF NOT EXISTS cash_count_details (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id INTEGER NOT NULL,
+      denomination INTEGER NOT NULL,
+      quantity INTEGER NOT NULL,
+      total REAL NOT NULL,
+      type TEXT NOT NULL,
+      FOREIGN KEY (session_id) REFERENCES cash_sessions(id)
+    );
+  `, [], () => done && done())));
+}
+
 function migrateCloudOutbox(tx, done){
   tx.executeSql(`CREATE TABLE IF NOT EXISTS outbox_sales(
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -250,7 +292,8 @@ export function initDB(){
           cb => migrateProductsWeight(tx, cb),
           cb => migrateSaleItemsQty(tx, cb),
           cb => migrateProductImages(tx, cb),
-          cb => migrateSaleTransferProof(tx, cb)
+          cb => migrateSaleTransferProof(tx, cb),
+          cb => migrateCashManagement(tx, cb)
         ];
         
         if (index >= migrations.length) {
@@ -681,5 +724,326 @@ export function markSaleSynced(localSaleId, cloudSaleId){
     db().transaction((tx)=>{
       tx.executeSql(`UPDATE outbox_sales SET synced=1, cloud_sale_id=?, synced_at=? WHERE local_sale_id=?;`, [String(cloudSaleId||''), now, localSaleId]);
     }, reject, ()=>resolve(true));
+  });
+}
+
+// === FUNCIONES DE MANEJO DE CAJA ===
+
+// Abrir nueva sesión de caja chica
+export function openCashSession(openingAmount, userId, userName) {
+  return new Promise((resolve, reject) => {
+    db().transaction((tx) => {
+      const startDate = new Date().toISOString();
+      tx.executeSql(
+        `INSERT INTO cash_sessions (start_date, opening_amount, opened_by, status) VALUES (?, ?, ?, 'open')`,
+        [startDate, openingAmount, `${userId}|${userName}`],
+        (_, result) => resolve(result.insertId),
+        (_, error) => reject(error)
+      );
+    });
+  });
+}
+
+// Obtener sesión de caja actual (abierta)
+export function getCurrentCashSession() {
+  return new Promise((resolve, reject) => {
+    db().transaction((tx) => {
+      tx.executeSql(
+        `SELECT * FROM cash_sessions WHERE status = 'open' ORDER BY id DESC LIMIT 1`,
+        [],
+        (_, result) => resolve(result.rows.length > 0 ? result.rows.item(0) : null)
+      );
+    }, reject);
+  });
+}
+
+// Calcular monto esperado en caja
+export function calculateExpectedCashAmount(sessionId) {
+  return new Promise((resolve, reject) => {
+    db().transaction((tx) => {
+      // Primero obtener datos de la sesión
+      tx.executeSql(
+        `SELECT opening_amount, start_date FROM cash_sessions WHERE id = ?`,
+        [sessionId],
+        (_, sessionResult) => {
+          if (sessionResult.rows.length === 0) {
+            reject(new Error('Sesión no encontrada'));
+            return;
+          }
+          
+          const session = sessionResult.rows.item(0);
+          const openingAmount = session.opening_amount;
+          const startTimestamp = new Date(session.start_date).getTime();
+          
+          // Obtener ventas desde que se abrió la caja
+          tx.executeSql(
+            `SELECT 
+              COALESCE(SUM(CASE WHEN (payment_method IS NULL OR payment_method = '' OR payment_method = 'efectivo' OR payment_method = 'cash') THEN COALESCE(cash_received, total) ELSE 0 END), 0) as cash_received,
+              COALESCE(SUM(CASE WHEN (payment_method IS NULL OR payment_method = '' OR payment_method = 'efectivo' OR payment_method = 'cash') THEN COALESCE(change_given, 0) ELSE 0 END), 0) as total_change
+             FROM sales 
+             WHERE ts >= ? AND voided = 0`,
+            [startTimestamp],
+            (_, salesResult) => {
+              const data = salesResult.rows.item(0);
+              // Fórmula corregida: monto inicial + dinero recibido - vuelto dado
+              const expectedAmount = openingAmount + data.cash_received - data.total_change;
+              
+              resolve({
+                openingAmount,
+                cashReceived: data.cash_received,
+                totalChange: data.total_change,
+                expectedAmount
+              });
+            },
+            (_, error) => reject(error)
+          );
+        },
+        (_, error) => reject(error)
+      );
+    });
+  });
+}
+
+// Cerrar sesión de caja con arqueo
+export function closeCashSession(sessionId, actualAmount, countDetails, userId, userName, nextDayAmount = 0, notes = '') {
+  return new Promise((resolve, reject) => {
+    calculateExpectedCashAmount(sessionId).then(cashData => {
+      const difference = actualAmount - cashData.expectedAmount;
+      const endDate = new Date().toISOString();
+      const amountToSafe = actualAmount - nextDayAmount; // Lo que va a caja fuerte
+      
+      db().transaction((tx) => {
+        // Cerrar la sesión de caja
+        tx.executeSql(
+          `UPDATE cash_sessions SET 
+            end_date = ?, 
+            expected_amount = ?, 
+            actual_amount = ?, 
+            difference = ?, 
+            closed_by = ?, 
+            notes = ?, 
+            status = 'closed' 
+           WHERE id = ?`,
+          [endDate, cashData.expectedAmount, actualAmount, difference, `${userId}|${userName}`, notes, sessionId],
+          (_, result) => {
+            // Guardar detalles del conteo si existen
+            if (countDetails && countDetails.length > 0) {
+              countDetails.forEach(detail => {
+                tx.executeSql(
+                  `INSERT INTO cash_count_details (session_id, denomination, quantity, total, type) VALUES (?, ?, ?, ?, ?)`,
+                  [sessionId, detail.denomination, detail.quantity, detail.total, detail.type]
+                );
+              });
+            }
+            
+            // Depositar el dinero a caja fuerte (descontando lo del día siguiente)
+            if (amountToSafe > 0) {
+              const description = nextDayAmount > 0 
+                ? `Depósito al cerrar caja - Sesión ${sessionId} (Dejando $${nextDayAmount.toLocaleString()} para mañana)`
+                : `Depósito automático al cerrar caja - Sesión ${sessionId}`;
+                
+              tx.executeSql(
+                `INSERT INTO safe_movements (type, amount, description, session_id, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+                ['deposit', amountToSafe, description, sessionId, `${userId}|${userName}`, endDate],
+                () => {
+                  resolve({
+                    expectedAmount: cashData.expectedAmount,
+                    actualAmount,
+                    difference,
+                    nextDayAmount,
+                    amountToSafe,
+                    success: true
+                  });
+                },
+                (_, error) => reject(error)
+              );
+            } else {
+              resolve({
+                expectedAmount: cashData.expectedAmount,
+                actualAmount,
+                difference,
+                nextDayAmount,
+                amountToSafe: 0,
+                success: true
+              });
+            }
+          },
+          (_, error) => reject(error)
+        );
+      });
+    }).catch(reject);
+  });
+}
+
+// Depositar dinero en caja fuerte
+export function depositToSafe(amount, description, sessionId = null, userId, userName) {
+  return new Promise((resolve, reject) => {
+    db().transaction((tx) => {
+      tx.executeSql(
+        `INSERT INTO safe_movements (type, amount, description, session_id, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+        ['deposit', amount, description, sessionId, `${userId}|${userName}`, new Date().toISOString()],
+        (_, result) => resolve(result.insertId),
+        (_, error) => reject(error)
+      );
+    });
+  });
+}
+
+// Retirar dinero de caja fuerte
+export function withdrawFromSafe(amount, description, userId, userName) {
+  return new Promise((resolve, reject) => {
+    db().transaction((tx) => {
+      tx.executeSql(
+        `INSERT INTO safe_movements (type, amount, description, created_by, created_at) VALUES (?, ?, ?, ?, ?)`,
+        ['withdrawal', amount, description, `${userId}|${userName}`, new Date().toISOString()],
+        (_, result) => resolve(result.insertId),
+        (_, error) => reject(error)
+      );
+    });
+  });
+}
+
+// Obtener balance actual de caja fuerte
+export function getSafeBalance() {
+  return new Promise((resolve, reject) => {
+    db().transaction((tx) => {
+      tx.executeSql(
+        `SELECT 
+          COALESCE(SUM(CASE WHEN type = 'deposit' THEN amount ELSE -amount END), 0) as balance,
+          COUNT(*) as total_movements
+         FROM safe_movements`,
+        [],
+        (_, result) => resolve(result.rows.item(0))
+      );
+    }, reject);
+  });
+}
+
+// Obtener historial de sesiones de caja
+export function getCashSessionsHistory(limit = 30) {
+  return new Promise((resolve, reject) => {
+    db().transaction((tx) => {
+      tx.executeSql(
+        `SELECT * FROM cash_sessions ORDER BY id DESC LIMIT ?`,
+        [limit],
+        (_, result) => resolve(rowsToArray(result))
+      );
+    }, reject);
+  });
+}
+
+// Obtener movimientos de caja fuerte
+export function getSafeMovements(limit = 50) {
+  return new Promise((resolve, reject) => {
+    db().transaction((tx) => {
+      tx.executeSql(
+        `SELECT * FROM safe_movements ORDER BY id DESC LIMIT ?`,
+        [limit],
+        (_, result) => resolve(rowsToArray(result))
+      );
+    }, reject);
+  });
+}
+
+// Obtener historial completo de transacciones de caja
+export function getCashTransactionsHistory(limit = 50) {
+  return new Promise((resolve, reject) => {
+    db().transaction((tx) => {
+      // Obtener sesiones de caja (apertura y cierre)
+      tx.executeSql(`
+        SELECT 
+          'session_start' as type,
+          cs.start_date as timestamp,
+          cs.opening_amount as amount,
+          'Apertura de caja' as description,
+          cs.opened_by as user,
+          cs.id as reference_id
+        FROM cash_sessions cs
+        WHERE cs.start_date IS NOT NULL
+        
+        UNION ALL
+        
+        SELECT 
+          'session_end' as type,
+          cs.end_date as timestamp,
+          cs.actual_amount as amount,
+          'Cierre de caja' as description,
+          cs.closed_by as user,
+          cs.id as reference_id
+        FROM cash_sessions cs
+        WHERE cs.end_date IS NOT NULL
+        
+        ORDER BY timestamp DESC
+        LIMIT ?
+      `, [Math.min(limit, 20)], 
+      (_, result) => {
+        const sessions = rowsToArray(result);
+        
+        // Obtener movimientos de caja fuerte
+        tx.executeSql(`
+          SELECT 
+            'safe_movement' as type,
+            sm.created_at as timestamp,
+            CASE 
+              WHEN sm.type = 'deposit' THEN sm.amount
+              WHEN sm.type = 'withdrawal' THEN -sm.amount
+              ELSE sm.amount
+            END as amount,
+            CASE 
+              WHEN sm.type = 'deposit' THEN 'Depósito en caja fuerte'
+              WHEN sm.type = 'withdrawal' THEN 'Retiro de caja fuerte'
+              ELSE sm.type
+            END as description,
+            sm.created_by as user,
+            sm.id as reference_id
+          FROM safe_movements sm
+          ORDER BY sm.created_at DESC
+          LIMIT ?
+        `, [Math.min(limit, 20)],
+        (_, movementsResult) => {
+          const movements = rowsToArray(movementsResult);
+          
+          // Obtener ventas con efectivo
+          tx.executeSql(`
+            SELECT 
+              'sale' as type,
+              datetime(s.ts/1000, 'unixepoch') as timestamp,
+              s.cash_received as amount,
+              'Venta - Efectivo: $' || COALESCE(s.cash_received, 0) || ' | Cambio: $' || COALESCE(s.change_given, 0) as description,
+              'Sistema' as user,
+              s.id as reference_id
+            FROM sales s
+            WHERE s.cash_received > 0 AND s.voided = 0
+            ORDER BY s.ts DESC
+            LIMIT ?
+          `, [Math.min(limit, 20)],
+          (_, salesResult) => {
+            const sales = rowsToArray(salesResult);
+            
+            // Combinar y ordenar todos los resultados
+            const allTransactions = [...sessions, ...movements, ...sales];
+            allTransactions.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+            
+            resolve(allTransactions.slice(0, limit));
+          },
+          (_, error) => {
+            console.warn('Error obteniendo ventas:', error);
+            resolve([...sessions, ...movements].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)));
+          });
+        },
+        (_, error) => {
+          console.warn('Error obteniendo movimientos:', error);
+          resolve(sessions);
+        });
+      },
+      (_, error) => {
+        console.warn('Error obteniendo sesiones:', error);
+        resolve([]);
+      });
+    }, 
+    (error) => {
+      console.error('Error en transacción de historial:', error);
+      resolve([]);
+    });
   });
 }

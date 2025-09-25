@@ -11,7 +11,10 @@ import ProductForm from './src/screens/ProductForm';
 import SellScreen from './src/screens/SellScreen';
 import SalesHistoryScreen from './src/screens/SalesHistoryScreen';
 import SalesDashboardScreen from './src/screens/SalesDashboardScreen';
+import CashHistoryScreen from './src/screens/CashHistoryScreen';
 import QuickScanScreen from './src/screens/QuickScanScreen';
+import LoginScreen from './src/screens/LoginScreen';
+import CashManagementScreen from './src/screens/CashManagementScreen';
 import { exportCSVFile, exportJSONFile } from './src/export';
 
 import Header from './src/ui/Header';
@@ -22,20 +25,32 @@ import { theme } from './src/ui/Theme';
 // Sync cloud
 import { syncNow, initRealtimeSync } from './src/sync';
 
+// Auth
+import AuthManager from './src/auth/AuthManager';
+
 // Separamos la función App para garantizar el orden correcto de los hooks
 export default function App() {
+  // Estados de autenticación
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [currentUser, setCurrentUser] = useState(null);
+  const [isCheckingAuth, setIsCheckingAuth] = useState(true);
+
   // Estados de la aplicación - TODOS los hooks deben definirse aquí al principio
   const [ready, setReady] = useState(false);
   const [tab, setTab] = useState('sales');
 
   const [products, setProducts] = useState([]);
   const [search, setSearch] = useState('');
+  const [hasMoreProducts, setHasMoreProducts] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
 
   const [editing, setEditing] = useState(null);
   const [openForm, setOpenForm] = useState(false);
   const [openHistory, setOpenHistory] = useState(false);
   const [openDashboard, setOpenDashboard] = useState(false);
+  const [openCashHistory, setOpenCashHistory] = useState(false);
   const [openQuickScan, setOpenQuickScan] = useState(false);
+  const [openCash, setOpenCash] = useState(false);
   const [isSyncLoading, setIsSyncLoading] = useState(false);
   const [lastSyncTime, setLastSyncTime] = useState(Date.now());
   const [saleRequestedBarcode, setSaleRequestedBarcode] = useState(null);
@@ -45,16 +60,84 @@ export default function App() {
   const { width } = useWindowDimensions();
   const isCompact = width < 380;
 
-  const refresh = useCallback(async () => {
+  // Verificar autenticación al iniciar
+  useEffect(() => {
+    const checkAuth = async () => {
+      try {
+        const user = await AuthManager.getCurrentUser();
+        if (user) {
+          setCurrentUser(user);
+          setIsLoggedIn(true);
+        }
+      } catch (error) {
+        console.error('Error verificando autenticación:', error);
+      } finally {
+        setIsCheckingAuth(false);
+      }
+    };
+
+    checkAuth();
+  }, []);
+
+  const handleLoginSuccess = useCallback((user) => {
+    setCurrentUser(user);
+    setIsLoggedIn(true);
+  }, []);
+
+  const handleLogout = useCallback(async () => {
+    Alert.alert(
+      'Cerrar Sesión',
+      `¿Deseas cerrar la sesión de ${currentUser?.name}?`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Cerrar Sesión',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await AuthManager.logout();
+              setCurrentUser(null);
+              setIsLoggedIn(false);
+              setReady(false); // Reset app state
+            } catch (error) {
+              console.error('Error cerrando sesión:', error);
+            }
+          }
+        }
+      ]
+    );
+  }, [currentUser]);
+
+  const refresh = useCallback(async (limit = 50, offset = 0, searchQuery = '') => {
     try {
-      const rows = await listProducts();
-      setProducts(rows);
+      const rows = await listProducts(limit, offset, searchQuery);
+      if (offset === 0) {
+        setProducts(rows);
+        setHasMoreProducts(rows.length === limit);
+      } else {
+        setProducts(prev => [...prev, ...rows]);
+        setHasMoreProducts(rows.length === limit);
+      }
     } catch {
       Alert.alert('Error', 'No se pudo cargar el listado');
     }
   }, []);
 
+  const loadMoreProducts = useCallback(async () => {
+    if (!hasMoreProducts || loadingMore) return;
+    
+    setLoadingMore(true);
+    try {
+      await refresh(50, products.length, search);
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [refresh, products.length, search, hasMoreProducts, loadingMore]);
+
   useEffect(() => {
+    // Solo inicializar si está logueado
+    if (!isLoggedIn) return;
+
     // Función para inicializar la aplicación - La separamos para mejor manejo de errores
     const initializeApp = async () => {
       let initTimeout = null;
@@ -78,8 +161,8 @@ export default function App() {
         // Inicializar la base de datos
         await initDB();
         
-        // Cargar productos
-        await refresh();
+        // NO cargar productos inmediatamente - se cargarán cuando sea necesario
+        // await refresh();
         
         // Todo se completó correctamente, actualizar estado
         setReady(true);
@@ -122,23 +205,28 @@ export default function App() {
     }, 5 * 60 * 1000);
     
     return () => clearInterval(syncInterval);
-  }, [refresh]);
+  }, [refresh, isLoggedIn]);
 
-  const norm = (s) =>
-    String(s || '')
-      .toLowerCase()
-      .normalize('NFD')
-      .replace(/\p{Diacritic}/gu, '');
+  // Cargar productos solo cuando se accede a la pestaña de inventario
+  useEffect(() => {
+    if (ready && tab === 'inventory' && products.length === 0 && !search.trim()) {
+      refresh();
+    }
+  }, [tab, ready, refresh, products.length, search]);
 
-  const filtered = useMemo(() => {
-    if (!search.trim()) return products;
-    const q = norm(search);
-    return products.filter(p =>
-      norm(p.name).includes(q) ||
-      norm(p.category).includes(q) ||
-      String(p.barcode || '').toLowerCase().includes(q)
-    );
-  }, [products, search]);
+  // Búsqueda con debounce para evitar consultas excesivas
+  useEffect(() => {
+    if (tab !== 'inventory' || !ready) return;
+    
+    const timeoutId = setTimeout(() => {
+      refresh(50, 0, search);
+    }, 300); // Esperar 300ms después de que el usuario termine de escribir
+
+    return () => clearTimeout(timeoutId);
+  }, [search, tab, ready, refresh]);
+
+  // Ya no necesitamos filtrado en memoria - se hace en la base de datos
+  const filtered = products;
 
   const onCreate = useCallback(() => {
     setSaleRequestedBarcode(null);
@@ -231,6 +319,21 @@ export default function App() {
   }, [isCompact, onDelete, onEdit]);
 
   // Después de definir todos los hooks, podemos usar renderizados condicionales
+  
+  // Si está verificando autenticación, mostrar loading
+  if (isCheckingAuth) {
+    return (
+      <SafeAreaView style={styles.center}>
+        <Text>Verificando sesión...</Text>
+      </SafeAreaView>
+    );
+  }
+
+  // Si no está logueado, mostrar pantalla de login
+  if (!isLoggedIn) {
+    return <LoginScreen onLoginSuccess={handleLoginSuccess} />;
+  }
+
   if (!ready) {
     return (
       <SafeAreaView style={styles.center}>
@@ -275,6 +378,8 @@ export default function App() {
       <Header
         title="OlivoMarket"
         subtitle={tab === 'sales' ? 'Caja y ventas' : tab === 'inventory' ? 'Inventario y productos' : 'Reportes y tendencias'}
+        currentUser={currentUser}
+        onLogout={handleLogout}
       />
       <TopTabs
         tabs={[{ key: 'sales', label: 'Ventas' }, { key: 'inventory', label: 'Inventario' }, { key: 'reports', label: 'Reportes' }]}
@@ -319,7 +424,7 @@ export default function App() {
           </View>
 
           <Text style={styles.caption}>
-            {search ? `Resultados: ${filtered.length}/${products.length}` : `Productos: ${products.length}`}
+            {search ? `Búsqueda: "${search}" - ${filtered.length} resultado(s)` : `Productos cargados: ${products.length}`}
           </Text>
 
           <FlatList
@@ -329,6 +434,19 @@ export default function App() {
             contentContainerStyle={{ paddingBottom: 120 }}
             renderItem={renderProduct}
             ListEmptyComponent={<Text style={styles.emptyText}>{search ? 'Sin resultados para tu búsqueda' : 'No hay productos'}</Text>}
+            ListFooterComponent={() => (
+              hasMoreProducts && !search ? (
+                <TouchableOpacity 
+                  style={styles.loadMoreBtn} 
+                  onPress={loadMoreProducts}
+                  disabled={loadingMore}
+                >
+                  <Text style={styles.loadMoreText}>
+                    {loadingMore ? '⏳ Cargando...' : '📄 Cargar más productos'}
+                  </Text>
+                </TouchableOpacity>
+              ) : null
+            )}
             initialNumToRender={10}
             maxToRenderPerBatch={10}
             windowSize={6}
@@ -353,6 +471,13 @@ export default function App() {
             pendingBarcode={saleRequestedBarcode}
             recentlyCreatedBarcode={recentlyCreatedBarcode}
             onConsumeRecentBarcode={consumeRecentProduct}
+            currentUser={currentUser}
+          />
+          
+          <FAB
+            items={[
+              { icon: '💰', label: 'Caja', onPress: () => setOpenCash(true) },
+            ]}
           />
         </View>
       )}
@@ -380,6 +505,11 @@ export default function App() {
               <Text style={styles.reportEmoji}>📊</Text>
               <Text style={styles.reportTitle}>Dashboard</Text>
               <Text style={styles.reportDesc}>Tendencia de 7 días, 30 días o 12 meses.</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.reportCard} onPress={() => setOpenCashHistory(true)}>
+              <Text style={styles.reportEmoji}>💰</Text>
+              <Text style={styles.reportTitle}>Historial de Caja</Text>
+              <Text style={styles.reportDesc}>Transacciones, apertura, cierre y movimientos de efectivo.</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -432,6 +562,23 @@ export default function App() {
           />
         </SafeAreaView>
       </Modal>
+
+      {/* Cash History Modal */}
+      <Modal visible={openCashHistory} animationType="slide" onRequestClose={() => setOpenCashHistory(false)}>
+        <SafeAreaView style={{ flex: 1, backgroundColor: '#fff' }}>
+          <CashHistoryScreen 
+            onBack={() => setOpenCashHistory(false)}
+          />
+        </SafeAreaView>
+      </Modal>
+
+      {/* Cash Management Modal */}
+      <Modal visible={openCash} animationType="slide" presentationStyle="pageSheet">
+        <CashManagementScreen 
+          currentUser={currentUser}
+          onClose={() => setOpenCash(false)}
+        />
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -467,9 +614,23 @@ const styles = StyleSheet.create({
   smallBtnTxt: { color: '#0b5', fontWeight: '700' },
   emptyText: { color: '#888', textAlign: 'center', marginTop: 24 },
 
-  reportGrid: { flexDirection: 'row', gap: 12, marginTop: 12 },
+  loadMoreBtn: {
+    backgroundColor: '#f8f9fa',
+    borderWidth: 1,
+    borderColor: '#e9ecef',
+    borderRadius: 12,
+    padding: 16,
+    marginTop: 16,
+    alignItems: 'center',
+  },
+  loadMoreText: {
+    color: '#6c757d',
+    fontWeight: '600',
+  },
+
+  reportGrid: { flexDirection: 'column', gap: 12, marginTop: 12 },
   reportCard: {
-    flex: 1, backgroundColor: '#fff', borderRadius: 16, padding: 16, borderWidth: 1, borderColor: '#eee',
+    backgroundColor: '#fff', borderRadius: 16, padding: 16, borderWidth: 1, borderColor: '#eee',
     shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 6, shadowOffset: { width: 0, height: 2 }, elevation: 1
   },
   reportEmoji: { fontSize: 28, marginBottom: 6 },
