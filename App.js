@@ -5,6 +5,8 @@ import {
   TextInput, TouchableOpacity, Keyboard, Platform, Image, useWindowDimensions
 } from 'react-native';
 import { InteractionManager } from 'react-native';
+// Aseguramos que todos los hooks se importan correctamente
+import * as React from 'react';
 
 import { initDB, listProducts, deleteProductByBarcode } from './src/db';
 import ProductForm from './src/screens/ProductForm';
@@ -22,7 +24,9 @@ import { theme } from './src/ui/Theme';
 // Sync cloud
 import { syncNow, initRealtimeSync } from './src/sync';
 
+// Separamos la función App para garantizar el orden correcto de los hooks
 export default function App() {
+  // Estados de la aplicación - TODOS los hooks deben definirse aquí al principio
   const [ready, setReady] = useState(false);
   const [tab, setTab] = useState('sales');
 
@@ -38,6 +42,7 @@ export default function App() {
   const [lastSyncTime, setLastSyncTime] = useState(Date.now());
   const [saleRequestedBarcode, setSaleRequestedBarcode] = useState(null);
   const [recentlyCreatedBarcode, setRecentlyCreatedBarcode] = useState(null);
+  const [initError, setInitError] = useState(null);
 
   const { width } = useWindowDimensions();
   const isCompact = width < 380;
@@ -52,30 +57,36 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    (async () => {
+    // Función para inicializar la aplicación - La separamos para mejor manejo de errores
+    const initializeApp = async () => {
+      let initTimeout = null;
       try {
         console.log('🚀 Iniciando la aplicación...');
+        
         // Establecer un timeout para mostrar error si initDB tarda demasiado
-        const initTimeout = setTimeout(() => {
+        initTimeout = setTimeout(() => {
           Alert.alert(
             'Inicialización lenta',
             'La base de datos está tardando en inicializarse. ¿Desea continuar esperando?',
             [
               { text: 'Esperar', style: 'default' },
               { text: 'Cancelar', style: 'cancel', onPress: () => {
-                Alert.alert('Error', 'Inicialización cancelada por el usuario');
+                setInitError('Inicialización cancelada por el usuario');
               }}
             ]
           );
         }, 10000); // 10 segundos
         
+        // Inicializar la base de datos
         await initDB();
-        clearTimeout(initTimeout);
         
+        // Cargar productos
         await refresh();
+        
+        // Todo se completó correctamente, actualizar estado
         setReady(true);
-
-        // Poner sincronización en background para no bloquear UI
+        
+        // Sincronización en segundo plano
         setTimeout(() => {
           InteractionManager.runAfterInteractions(async () => {
             try { 
@@ -89,15 +100,30 @@ export default function App() {
         }, 1000);
       } catch (e) {
         console.error('Error al inicializar DB:', e);
-        Alert.alert('Error', 'Fallo al inicializar la base de datos: ' + (e.message || e));
+        setInitError('Fallo al inicializar: ' + (e.message || String(e)));
+      } finally {
+        // Aseguramos que el timeout se limpia
+        if (initTimeout) {
+          clearTimeout(initTimeout);
+        }
       }
-    })();
+    };
+    
+    // Iniciar el proceso de inicialización
+    initializeApp();
 
     // Auto-sync cada 5 minutos (opcional)
-    const id = setInterval(async () => {
-      try { await syncNow(); await refresh(); } catch {}
+    const syncInterval = setInterval(async () => {
+      if (!ready) return; // No sincronizar si aún no está listo
+      try { 
+        await syncNow(); 
+        await refresh(); 
+      } catch (e) {
+        console.warn('Error en sincronización automática:', e);
+      }
     }, 5 * 60 * 1000);
-    return () => clearInterval(id);
+    
+    return () => clearInterval(syncInterval);
   }, [refresh]);
 
   const norm = (s) =>
@@ -180,6 +206,7 @@ export default function App() {
     setSaleRequestedBarcode(null);
   }, []);
 
+  // Importante: Definimos todos los hooks primero
   const renderProduct = useCallback(({ item }) => {
     return (
       <View style={[styles.card, isCompact && styles.cardCompact]}>
@@ -205,10 +232,42 @@ export default function App() {
     );
   }, [isCompact, onDelete, onEdit]);
 
+  // Después de definir todos los hooks, podemos usar renderizados condicionales
   if (!ready) {
     return (
       <SafeAreaView style={styles.center}>
-        <Text>Inicializando base de datos...</Text>
+        {initError ? (
+          <View style={{ alignItems: 'center', padding: 20 }}>
+            <Text style={{ color: '#b00020', marginBottom: 16, textAlign: 'center' }}>
+              Error: {initError}
+            </Text>
+            <TouchableOpacity 
+              style={{
+                backgroundColor: '#007BFF', 
+                paddingVertical: 12, 
+                paddingHorizontal: 24, 
+                borderRadius: 8
+              }}
+              onPress={() => {
+                setInitError(null);
+                // Reintentar inicialización
+                (async () => {
+                  try {
+                    await initDB();
+                    await refresh();
+                    setReady(true);
+                  } catch (e) {
+                    setInitError('Error al reintentar: ' + (e.message || String(e)));
+                  }
+                })();
+              }}
+            >
+              <Text style={{ color: '#fff', fontWeight: 'bold' }}>Reintentar</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <Text>Inicializando base de datos...</Text>
+        )}
       </SafeAreaView>
     );
   }

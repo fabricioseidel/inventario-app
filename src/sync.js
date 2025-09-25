@@ -182,22 +182,45 @@ export async function syncNow() {
   try {
     // 1) Subir primero todo lo local
     console.log('📤 Subiendo productos...');
-    await pushProducts();
+    try {
+      await pushProducts();
+    } catch (e) {
+      console.warn('⚠️ Error subiendo productos:', e);
+      // Continuamos con el proceso
+    }
     
     console.log('📤 Subiendo categorías...');
-    await pushCategories();
+    try {
+      await pushCategories();
+    } catch (e) {
+      console.warn('⚠️ Error subiendo categorías:', e);
+      // Continuamos con el proceso
+    }
     
     console.log('📤 Subiendo ventas...');
-    await pushSales();
+    try {
+      await pushSales();
+    } catch (e) {
+      console.warn('⚠️ Error subiendo ventas:', e);
+      // Continuamos con el proceso
+    }
 
     // 2) Luego bajar lo más reciente
     console.log('📥 Descargando productos...');
-    const lastProductTs = await listLocalProductsUpdatedAfter();
-    await pullProducts({ sinceTs: lastProductTs });
+    try {
+      const lastProductTs = await listLocalProductsUpdatedAfter();
+      await pullProducts({ sinceTs: lastProductTs });
+    } catch (e) {
+      console.warn('⚠️ Error descargando productos:', e);
+    }
     
     console.log('📥 Descargando ventas...');
-    const lastSaleTs = await getLastSaleTs();
-    await pullSales({ sinceTs: lastSaleTs });
+    try {
+      const lastSaleTs = await getLastSaleTs();
+      await pullSales({ sinceTs: lastSaleTs });
+    } catch (e) {
+      console.warn('⚠️ Error descargando ventas:', e);
+    }
     
     console.log('✅ Sincronización completada exitosamente');
     return true;
