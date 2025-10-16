@@ -399,10 +399,26 @@ export function getProductByBarcode(barcode){
     }, reject);
   });
 }
-export function listProducts(){
+export function listProducts(offset=0, limit=20, search=''){
   return new Promise((resolve,reject)=>{
+    let sql = `SELECT * FROM products`;
+    let params = [];
+    if(search && search.trim()){
+      sql += ` WHERE (name LIKE ? OR barcode LIKE ?)`;
+      const like = `%${search.trim()}%`;
+      params.push(like, like);
+    }
+    sql += ` ORDER BY updated_at DESC, name ASC, id DESC`;
+    if(limit > 0){
+      sql += ` LIMIT ?`;
+      params.push(limit);
+    }
+    if(offset > 0){
+      sql += ` OFFSET ?`;
+      params.push(offset);
+    }
     db().transaction((tx)=>{
-      tx.executeSql(`SELECT * FROM products ORDER BY updated_at DESC, name ASC, id DESC;`, [], (_,_r)=>resolve(rowsToArray(_r)));
+      tx.executeSql(sql, params, (_,_r)=>resolve(rowsToArray(_r)));
     }, reject);
   });
 }

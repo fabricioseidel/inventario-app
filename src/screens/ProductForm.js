@@ -4,7 +4,7 @@ import {
   View, Text, StyleSheet, TextInput, ScrollView, TouchableOpacity, KeyboardAvoidingView, Platform, Alert, Modal, Switch, Image
 } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import { insertOrUpdateProduct, listCategories, addCategory } from '../db';
+import { insertOrUpdateProduct, listCategories, addCategory, getProductByBarcode } from '../db';
 import { theme } from '../ui/Theme';
 import * as ImagePicker from 'expo-image-picker';
 import { copyFileToDocuments } from '../utils/media';
@@ -132,6 +132,20 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
     if (!payload.salePrice && !payload.purchasePrice) {
       return Alert.alert('Precio vacío', 'Agrega al menos precio de venta o de compra.');
     }
+
+    // Check if creating and barcode exists
+    const isCreating = !initial || !initial.barcode;
+    if (isCreating) {
+      try {
+        const existing = await getProductByBarcode(payload.barcode);
+        if (existing) {
+          return Alert.alert('Código existente', 'Ya existe un producto con este código de barras. Si quieres editarlo, búscalo primero.');
+        }
+      } catch (e) {
+        console.warn('Error checking barcode:', e);
+      }
+    }
+
     try {
       await insertOrUpdateProduct(payload);
       Alert.alert('Guardado', 'Producto guardado correctamente.');
