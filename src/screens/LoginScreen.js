@@ -1,27 +1,26 @@
 // src/screens/LoginScreen.js
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
-  TextInput,
   TouchableOpacity,
   Alert,
-  KeyboardAvoidingView,
-  Platform,
   ScrollView,
+  Modal,
+  TextInput,
 } from 'react-native';
 import AuthManager from '../auth/AuthManager';
 import { theme } from '../ui/Theme';
 
 export default function LoginScreen({ onLoginSuccess }) {
-  const [name, setName] = useState('');
-  const [pin, setPin] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
   const [users, setUsers] = useState([]);
-  const [showAddUser, setShowAddUser] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [renameTarget, setRenameTarget] = useState(null);
+  const [renameValue, setRenameValue] = useState('');
+  const [showAdd, setShowAdd] = useState(false);
   const [newUserName, setNewUserName] = useState('');
-  const [newUserPin, setNewUserPin] = useState('');
+  const [addLoading, setAddLoading] = useState(false);
 
   useEffect(() => {
     loadUsers();
@@ -30,195 +29,183 @@ export default function LoginScreen({ onLoginSuccess }) {
   const loadUsers = async () => {
     try {
       await AuthManager.initializeUsers();
-      const usersList = await AuthManager.getAllUsers();
-      setUsers(usersList);
+      const list = await AuthManager.getAllUsers();
+      setUsers(list);
     } catch (error) {
       console.error('Error cargando usuarios:', error);
+      Alert.alert('Error', 'No se pudo cargar la lista de usuarios.');
     }
   };
 
-  const handleLogin = async () => {
-    if (!name.trim() || !pin.trim()) {
-      Alert.alert('Error', 'Por favor ingresa nombre y PIN');
-      return;
-    }
-
-    setIsLoading(true);
-    try {
-      const user = await AuthManager.validateCredentials(name.trim(), pin.trim());
-      if (user) {
-        await AuthManager.login(user);
-        Alert.alert('Bienvenido', `¡Hola ${user.name}!`);
-        onLoginSuccess && onLoginSuccess(user);
-      } else {
-        Alert.alert('Error', 'Nombre o PIN incorrecto');
-      }
-    } catch (error) {
-      Alert.alert('Error', 'No se pudo iniciar sesión');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleQuickLogin = async (user) => {
+  const handleLogin = async (user) => {
     setIsLoading(true);
     try {
       await AuthManager.login(user);
-      Alert.alert('Bienvenido', `¡Hola ${user.name}!`);
+      Alert.alert('Bienvenido', `Hola ${user.name}`);
       onLoginSuccess && onLoginSuccess(user);
     } catch (error) {
-      Alert.alert('Error', 'No se pudo iniciar sesión');
+      Alert.alert('Error', 'No se pudo iniciar sesion.');
     } finally {
       setIsLoading(false);
     }
   };
 
-  const handleAddUser = async () => {
-    if (!newUserName.trim() || !newUserPin.trim()) {
-      Alert.alert('Error', 'Por favor completa todos los campos');
-      return;
-    }
+  const openRename = (user) => {
+    setRenameTarget(user);
+    setRenameValue(user.name);
+  };
 
-    if (newUserPin.length < 4) {
-      Alert.alert('Error', 'El PIN debe tener al menos 4 dígitos');
+  const closeRename = () => {
+    setRenameTarget(null);
+    setRenameValue('');
+  };
+
+  const handleRename = async () => {
+    const newName = renameValue.trim();
+    if (!newName) {
+      Alert.alert('Nombre requerido', 'Ingresa un nombre valido.');
       return;
     }
 
     try {
-      await AuthManager.addUser({
-        name: newUserName.trim(),
-        pin: newUserPin.trim(),
-      });
-      Alert.alert('Éxito', 'Usuario agregado correctamente');
-      setNewUserName('');
-      setNewUserPin('');
-      setShowAddUser(false);
+      await AuthManager.updateUserName(renameTarget.id, newName);
+      closeRename();
       loadUsers();
     } catch (error) {
-      Alert.alert('Error', 'No se pudo agregar el usuario');
+      Alert.alert('Error', error?.message || 'No se pudo actualizar el nombre.');
+    }
+  };
+
+  const openAdd = () => {
+    setNewUserName('');
+    setShowAdd(true);
+  };
+
+  const handleAddUser = async () => {
+    const candidate = newUserName.trim();
+    if (!candidate) {
+      Alert.alert('Nombre requerido', 'Ingresa un nombre valido.');
+      return;
+    }
+    setAddLoading(true);
+    try {
+      await AuthManager.addUser({ name: candidate });
+      setShowAdd(false);
+      setNewUserName('');
+      await loadUsers();
+    } catch (error) {
+      Alert.alert('Error', error?.message || 'No se pudo crear el usuario.');
+    } finally {
+      setAddLoading(false);
     }
   };
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.select({ ios: 'padding', android: undefined })}
-    >
-      <ScrollView contentContainerStyle={styles.scrollContent}>
+    <View style={styles.container}>
+      <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.header}>
           <Text style={styles.title}>OlivoMarket</Text>
-          <Text style={styles.subtitle}>Iniciar Sesión</Text>
+          <Text style={styles.subtitle}>Selecciona tu usuario para comenzar</Text>
         </View>
 
-        <View style={styles.form}>
-          <View style={styles.field}>
-            <Text style={styles.label}>Nombre de Usuario</Text>
-            <TextInput
-              style={styles.input}
-              value={name}
-              onChangeText={setName}
-              placeholder="Ingresa tu nombre"
-              autoCapitalize="words"
-              autoCorrect={false}
-            />
-          </View>
-
-          <View style={styles.field}>
-            <Text style={styles.label}>PIN</Text>
-            <TextInput
-              style={styles.input}
-              value={pin}
-              onChangeText={setPin}
-              placeholder="Ingresa tu PIN"
-              keyboardType="numeric"
-              secureTextEntry
-              maxLength={6}
-            />
-          </View>
-
-          <TouchableOpacity
-            style={[styles.loginBtn, isLoading && styles.loginBtnDisabled]}
-            onPress={handleLogin}
-            disabled={isLoading}
-          >
-            <Text style={styles.loginBtnText}>
-              {isLoading ? 'Iniciando...' : 'Iniciar Sesión'}
-            </Text>
-          </TouchableOpacity>
-        </View>
-
-        {users.length > 0 && (
-          <View style={styles.quickLogin}>
-            <Text style={styles.quickLoginTitle}>Acceso Rápido:</Text>
-            <View style={styles.usersList}>
-              {users.map((user) => (
-                <TouchableOpacity
-                  key={user.id}
-                  style={styles.userButton}
-                  onPress={() => handleQuickLogin(user)}
-                  disabled={isLoading}
-                >
-                  <Text style={styles.userButtonText}>{user.name}</Text>
-                </TouchableOpacity>
-              ))}
+        <View style={styles.list}>
+          {users.map((user) => (
+            <View key={user.id} style={styles.userCard}>
+              <TouchableOpacity
+                style={[styles.loginBtn, (isLoading || addLoading) && styles.loginBtnDisabled]}
+                onPress={() => handleLogin(user)}
+                disabled={isLoading || addLoading}
+              >
+                <Text style={styles.loginBtnText}>{user.name}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.renameBtn}
+                onPress={() => openRename(user)}
+                disabled={isLoading || addLoading}
+              >
+                <Text style={styles.renameBtnText}>Renombrar</Text>
+              </TouchableOpacity>
             </View>
-          </View>
-        )}
-
-        <View style={styles.addUserSection}>
-          {!showAddUser ? (
-            <TouchableOpacity
-              style={styles.addUserBtn}
-              onPress={() => setShowAddUser(true)}
-            >
-              <Text style={styles.addUserBtnText}>+ Agregar Usuario</Text>
-            </TouchableOpacity>
-          ) : (
-            <View style={styles.addUserForm}>
-              <Text style={styles.addUserTitle}>Nuevo Usuario</Text>
-              
-              <TextInput
-                style={styles.input}
-                value={newUserName}
-                onChangeText={setNewUserName}
-                placeholder="Nombre del usuario"
-                autoCapitalize="words"
-              />
-              
-              <TextInput
-                style={styles.input}
-                value={newUserPin}
-                onChangeText={setNewUserPin}
-                placeholder="PIN (4-6 dígitos)"
-                keyboardType="numeric"
-                secureTextEntry
-                maxLength={6}
-              />
-              
-              <View style={styles.addUserButtons}>
-                <TouchableOpacity
-                  style={styles.cancelBtn}
-                  onPress={() => {
-                    setShowAddUser(false);
-                    setNewUserName('');
-                    setNewUserPin('');
-                  }}
-                >
-                  <Text style={styles.cancelBtnText}>Cancelar</Text>
-                </TouchableOpacity>
-                
-                <TouchableOpacity
-                  style={styles.saveBtn}
-                  onPress={handleAddUser}
-                >
-                  <Text style={styles.saveBtnText}>Guardar</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          )}
+          ))}
         </View>
+
+        <TouchableOpacity
+          style={styles.addUserBtn}
+          onPress={openAdd}
+          disabled={isLoading || addLoading}
+        >
+          <Text style={styles.addUserBtnText}>+ Crear nuevo usuario</Text>
+        </TouchableOpacity>
+
+        <Text style={styles.hint}>
+          Usuarios internos sin PIN. Puedes renombrarlos o crear nuevos usuarios en cualquier momento.
+        </Text>
       </ScrollView>
-    </KeyboardAvoidingView>
+
+      <Modal visible={!!renameTarget} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Renombrar usuario</Text>
+            <Text style={styles.modalSubtitle}>
+              {renameTarget ? `Usuario actual: ${renameTarget.name}` : ''}
+            </Text>
+            <TextInput
+              style={styles.input}
+              value={renameValue}
+              onChangeText={setRenameValue}
+              placeholder="Nuevo nombre"
+              autoCapitalize="characters"
+            />
+            <View style={styles.modalButtons}>
+              <TouchableOpacity style={styles.modalBtn} onPress={closeRename} disabled={isLoading}>
+                <Text style={styles.modalBtnText}>Cancelar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalBtn, styles.modalBtnPrimary]}
+                onPress={handleRename}
+                disabled={isLoading}
+              >
+                <Text style={[styles.modalBtnText, styles.modalBtnTextPrimary]}>Guardar</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={showAdd} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Nuevo usuario</Text>
+            <Text style={styles.modalSubtitle}>Ingresa un nombre unico</Text>
+            <TextInput
+              style={styles.input}
+              value={newUserName}
+              onChangeText={setNewUserName}
+              placeholder="Nombre"
+              autoCapitalize="characters"
+            />
+            <View style={styles.modalButtons}>
+              <TouchableOpacity
+                style={styles.modalBtn}
+                onPress={() => setShowAdd(false)}
+                disabled={addLoading}
+              >
+                <Text style={styles.modalBtnText}>Cancelar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalBtn, styles.modalBtnPrimary]}
+                onPress={handleAddUser}
+                disabled={addLoading}
+              >
+                <Text style={[styles.modalBtnText, styles.modalBtnTextPrimary]}>
+                  {addLoading ? 'Guardando...' : 'Guardar'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+    </View>
   );
 }
 
@@ -227,7 +214,7 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: theme.colors.bg,
   },
-  scrollContent: {
+  content: {
     flexGrow: 1,
     justifyContent: 'center',
     paddingHorizontal: 24,
@@ -235,7 +222,7 @@ const styles = StyleSheet.create({
   },
   header: {
     alignItems: 'center',
-    marginBottom: 40,
+    marginBottom: 32,
   },
   title: {
     fontSize: 32,
@@ -244,37 +231,25 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   subtitle: {
-    fontSize: 18,
-    color: theme.colors.textMuted,
-    fontWeight: '600',
-  },
-  form: {
-    marginBottom: 32,
-  },
-  field: {
-    marginBottom: 20,
-  },
-  label: {
     fontSize: 16,
-    fontWeight: '600',
-    color: theme.colors.text,
-    marginBottom: 8,
+    color: theme.colors.textMuted,
+    textAlign: 'center',
   },
-  input: {
+  list: {
+    gap: 16,
+  },
+  userCard: {
+    backgroundColor: '#fff',
+    borderRadius: 14,
+    padding: 16,
     borderWidth: 1,
     borderColor: '#e6e6e6',
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    fontSize: 16,
-    backgroundColor: '#fff',
   },
   loginBtn: {
     backgroundColor: theme.colors.primary,
-    paddingVertical: 16,
-    borderRadius: 12,
+    paddingVertical: 14,
+    borderRadius: 10,
     alignItems: 'center',
-    marginTop: 8,
   },
   loginBtnDisabled: {
     opacity: 0.6,
@@ -284,90 +259,94 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '700',
   },
-  quickLogin: {
-    marginBottom: 32,
+  renameBtn: {
+    marginTop: 10,
+    alignSelf: 'center',
+    paddingVertical: 4,
+    paddingHorizontal: 8,
   },
-  quickLoginTitle: {
-    fontSize: 16,
+  renameBtnText: {
+    color: theme.colors.textMuted,
+    fontSize: 12,
     fontWeight: '600',
-    color: theme.colors.text,
-    marginBottom: 12,
-    textAlign: 'center',
-  },
-  usersList: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'center',
-    gap: 10,
-  },
-  userButton: {
-    backgroundColor: '#eef6ff',
-    borderWidth: 1,
-    borderColor: '#d8e7ff',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 20,
-  },
-  userButtonText: {
-    color: theme.colors.primary,
-    fontWeight: '600',
-  },
-  addUserSection: {
-    borderTopWidth: 1,
-    borderTopColor: '#eee',
-    paddingTop: 24,
+    textDecorationLine: 'underline',
   },
   addUserBtn: {
+    marginTop: 24,
+    alignSelf: 'center',
     borderWidth: 1,
-    borderColor: '#ddd',
-    borderStyle: 'dashed',
-    borderRadius: 12,
-    paddingVertical: 16,
-    alignItems: 'center',
+    borderColor: '#d8e7ff',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 999,
+    backgroundColor: '#eef6ff',
   },
   addUserBtnText: {
-    color: theme.colors.textMuted,
-    fontWeight: '600',
-  },
-  addUserForm: {
-    backgroundColor: '#f8f9fa',
-    borderRadius: 12,
-    padding: 16,
-  },
-  addUserTitle: {
-    fontSize: 18,
+    color: theme.colors.primary,
     fontWeight: '700',
-    color: theme.colors.text,
+  },
+  hint: {
+    marginTop: 24,
+    color: theme.colors.textMuted,
     textAlign: 'center',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  modalCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 20,
+    width: '100%',
+    maxWidth: 360,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    marginBottom: 4,
+    color: theme.colors.text,
+  },
+  modalSubtitle: {
+    fontSize: 14,
+    color: theme.colors.textMuted,
     marginBottom: 16,
   },
-  addUserButtons: {
-    flexDirection: 'row',
-    gap: 12,
-    marginTop: 16,
-  },
-  cancelBtn: {
-    flex: 1,
+  input: {
     borderWidth: 1,
-    borderColor: '#ddd',
-    paddingVertical: 12,
-    borderRadius: 8,
-    alignItems: 'center',
+    borderColor: '#dcdcdc',
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    fontSize: 16,
     backgroundColor: '#fff',
   },
-  cancelBtnText: {
+  modalButtons: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 12,
+    marginTop: 20,
+  },
+  modalBtn: {
+    paddingVertical: 10,
+    paddingHorizontal: 18,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#dcdcdc',
+    backgroundColor: '#fff',
+  },
+  modalBtnPrimary: {
+    backgroundColor: theme.colors.primary,
+    borderColor: theme.colors.primary,
+  },
+  modalBtnText: {
     color: theme.colors.text,
     fontWeight: '600',
   },
-  saveBtn: {
-    flex: 1,
-    backgroundColor: theme.colors.primary,
-    paddingVertical: 12,
-    borderRadius: 8,
-    alignItems: 'center',
-  },
-  saveBtnText: {
+  modalBtnTextPrimary: {
     color: '#fff',
-    fontWeight: '600',
   },
 });

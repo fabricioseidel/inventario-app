@@ -422,6 +422,27 @@ export function listProducts(offset=0, limit=20, search=''){
     }, reject);
   });
 }
+export function getProductsCount(search = ''){
+  return new Promise((resolve, reject)=>{
+    let sql = `SELECT COUNT(*) as count FROM products`;
+    const params = [];
+    if(search && search.trim()){
+      const like = `%${search.trim()}%`;
+      sql += ` WHERE (name LIKE ? OR barcode LIKE ?)`;
+      params.push(like, like);
+    }
+    db().transaction((tx)=>{
+      tx.executeSql(
+        sql,
+        params,
+        (_,_r)=>{
+          const raw = _r.rows.length ? _r.rows.item(0).count : 0;
+          resolve(Number(raw) || 0);
+        }
+      );
+    }, reject);
+  });
+}
 export function deleteProductByBarcode(barcode){
   return new Promise((resolve,reject)=>{
     db().transaction((tx)=>{ tx.executeSql(`DELETE FROM products WHERE barcode=?;`, [String(barcode)]); }, reject, ()=>resolve(true));
@@ -597,6 +618,88 @@ export function insertSaleFromCloud(payload){
         (_,_e)=>{ firstError = firstError || _e; return true; }
       );
     }, (txErr)=> reject(firstError||txErr), ()=> resolve(true) );
+  });
+}
+
+export function updateSaleTransferReceipt(saleId, proofUri, proofName) {
+  return new Promise((resolve, reject) => {
+    const uri = proofUri || null;
+    const name = proofName || null;
+    const now = Date.now();
+
+    db().transaction((tx) => {
+      tx.executeSql(
+        `UPDATE sales SET transfer_receipt_uri = ?, transfer_receipt_name = ?, is_synced = 0 WHERE id = ?;`,
+        [uri, name, saleId],
+      );
+
+      tx.executeSql(
+        `SELECT total, payment_method, cash_received, change_given, discount, tax, notes FROM sales WHERE id = ? LIMIT 1;`,
+        [saleId],
+        (_tx, saleRes) => {
+          if (!saleRes.rows.length) return;
+          const sale = saleRes.rows.item(0);
+
+          tx.executeSql(
+            `SELECT barcode, name, qty, unit_price, subtotal FROM sale_items WHERE sale_id = ?;`,
+            [saleId],
+            (_txItems, itemsRes) => {
+              const items = rowsToArray(itemsRes).map((it) => ({
+                barcode: String(it.barcode),
+                name: it.name,
+                qty: Number(it.qty || 0),
+                unit_price: Number(it.unit_price || 0),
+                subtotal: Number(it.subtotal || 0),
+              }));
+
+              tx.executeSql(
+                `SELECT id, client_sale_id FROM outbox_sales WHERE local_sale_id = ? LIMIT 1;`,
+                [saleId],
+                (_txOutbox, outboxRes) => {
+                  let clientId = `local-${now}-${Math.random().toString(36).slice(2, 8)}`;
+                  let outboxId = null;
+
+                  if (outboxRes.rows.length) {
+                    const row = outboxRes.rows.item(0);
+                    outboxId = row.id;
+                    if (row.client_sale_id) clientId = row.client_sale_id;
+                  }
+
+                  const payload = {
+                    total: sale.total,
+                    payment_method: sale.payment_method,
+                    cash_received: sale.cash_received,
+                    change_given: sale.change_given,
+                    discount: sale.discount,
+                    tax: sale.tax,
+                    notes: sale.notes,
+                    transfer_receipt_uri: uri,
+                    transfer_receipt_name: name,
+                    client_sale_id: clientId,
+                    items,
+                  };
+
+                  const payloadJson = JSON.stringify(payload);
+
+                  if (outboxId) {
+                    tx.executeSql(
+                      `UPDATE outbox_sales SET payload_json = ?, synced = 0, synced_at = NULL WHERE id = ?;`,
+                      [payloadJson, outboxId],
+                    );
+                  } else {
+                    tx.executeSql(
+                      `INSERT INTO outbox_sales (local_sale_id, client_sale_id, payload_json, synced, created_at)
+                       VALUES (?, ?, ?, 0, ?);`,
+                      [saleId, clientId, payloadJson, now],
+                    );
+                  }
+                }
+              );
+            }
+          );
+        }
+      );
+    }, reject, () => resolve(true));
   });
 }
 

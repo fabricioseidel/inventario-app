@@ -4,8 +4,11 @@ import { View, Text, Button, FlatList, Modal, SafeAreaView, TouchableOpacity, St
 import DateTimePicker from '@react-native-community/datetimepicker';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
-import { getSaleWithItems, listSalesBetween, exportSalesCSV, voidSale } from '../db';
+import * as DocumentPicker from 'expo-document-picker';
+import * as ImagePicker from 'expo-image-picker';
+import { getSaleWithItems, listSalesBetween, exportSalesCSV, voidSale, updateSaleTransferReceipt } from '../db';
 import { theme } from '../ui/Theme';
+import { copyFileToDocuments, getFileDisplayName } from '../utils/media';
 
 const PMETHODS = ['efectivo','debito','credito','transferencia'];
 function startOfDay(d){ const x=new Date(d); x.setHours(0,0,0,0); return x; }
@@ -27,6 +30,7 @@ export default function SalesHistoryScreen({ onClose, refreshKey }) {
   const [detailOpen, setDetailOpen] = useState(false);
   const [methods, setMethods] = useState(new Set());
   const [proofPreview, setProofPreview] = useState(null);
+  const [attachLoading, setAttachLoading] = useState(false);
 
   useEffect(()=> {
     const today=new Date();
@@ -101,6 +105,79 @@ export default function SalesHistoryScreen({ onClose, refreshKey }) {
     }
   };
 
+  const persistProof = async (localUri, displayName) => {
+    if (!detail?.sale?.id || !localUri) return;
+    setAttachLoading(true);
+    try {
+      const saved = await copyFileToDocuments(localUri, {
+        folder: 'receipts',
+        prefix: `sale-${detail.sale.id}`,
+      });
+      const named = displayName || getFileDisplayName(localUri) || null;
+      await updateSaleTransferReceipt(detail.sale.id, saved, named);
+      const updated = await getSaleWithItems(detail.sale.id);
+      setDetail(updated);
+      setSales(prev =>
+        prev.map(s =>
+          s.id === detail.sale.id ? { ...s, transfer_receipt_uri: saved, transfer_receipt_name: named } : s
+        )
+      );
+      Alert.alert('Comprobante', 'Archivo guardado correctamente.');
+    } catch (error) {
+      console.error('persistProof error', error);
+      Alert.alert('Error', 'No se pudo guardar el comprobante.');
+    } finally {
+      setAttachLoading(false);
+    }
+  };
+
+  const attachFromCamera = async () => {
+    try {
+      const perm = await ImagePicker.requestCameraPermissionsAsync();
+      if (!perm.granted) {
+        Alert.alert('Permiso requerido', 'Activa la camara para tomar una foto.');
+        return;
+      }
+      const result = await ImagePicker.launchCameraAsync({ allowsEditing: false, quality: 0.8 });
+      if (result.canceled) return;
+      const asset = result.assets?.[0];
+      if (asset?.uri) {
+        const name = asset.fileName || getFileDisplayName(asset.uri);
+        await persistProof(asset.uri, name);
+      }
+    } catch (error) {
+      console.warn('attachFromCamera error', error);
+      Alert.alert('Error', 'No se pudo usar la camara.');
+    }
+  };
+
+  const attachFromLibrary = async () => {
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({ allowsEditing: false, quality: 0.8 });
+      if (result.canceled) return;
+      const asset = result.assets?.[0];
+      if (asset?.uri) {
+        const name = asset.fileName || getFileDisplayName(asset.uri);
+        await persistProof(asset.uri, name);
+      }
+    } catch (error) {
+      console.warn('attachFromLibrary error', error);
+      Alert.alert('Error', 'No se pudo abrir la galeria.');
+    }
+  };
+
+  const attachFromFile = async () => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({ copyToCacheDirectory: false });
+      if (result.type !== 'success') return;
+      const name = result.name || getFileDisplayName(result.uri);
+      await persistProof(result.uri, name);
+    } catch (error) {
+      console.warn('attachFromFile error', error);
+      Alert.alert('Error', 'No se pudo adjuntar el archivo.');
+    }
+  };
+
   const hasImageProof = (uri) => /\.(png|jpg|jpeg|heic|heif|webp)$/i.test(String(uri || ''));
 
   const doExportCSV = async () => {
@@ -136,18 +213,28 @@ export default function SalesHistoryScreen({ onClose, refreshKey }) {
     ]);
   };
 
-  const renderSale = ({ item }) => (
-    <TouchableOpacity style={styles.saleRow} onPress={() => openDetail(item.id)}>
-      <View style={{ flex: 1 }}>
-        <Text style={styles.saleTitle}>
-          ${Number(item.total).toFixed(0)} · {item.payment_method || '—'} {item.transfer_receipt_uri ? '📎' : ''}
-        </Text>
-        <Text style={styles.saleSub}>{fmt(item.ts)}</Text>
-      </View>
-      <Text style={styles.saleGo}>›</Text>
-    </TouchableOpacity>
-  );
-
+  const renderSale = ({ item }) => {
+    const missingProof =
+      String(item.payment_method || '').toLowerCase() === 'transferencia' &&
+      !item.transfer_receipt_uri;
+    return (
+      <TouchableOpacity
+        style={[styles.saleRow, missingProof && styles.saleRowMissing]}
+        onPress={() => openDetail(item.id)}
+      >
+        <View style={{ flex: 1 }}>
+          <Text style={styles.saleTitle}>
+            ${Number(item.total).toFixed(0)} - {item.payment_method || '-'} {item.transfer_receipt_uri ? '[comprobante]' : ''}
+          </Text>
+          <Text style={styles.saleSub}>{fmt(item.ts)}</Text>
+          {missingProof && (
+            <Text style={styles.saleWarning}>Falta comprobante de transferencia</Text>
+          )}
+        </View>
+        <Text style={styles.saleGo}>{'>'}</Text>
+      </TouchableOpacity>
+    );
+  };
   return (
     <SafeAreaView style={{ flex:1, backgroundColor:'#fff' }}>
       <View style={{ paddingHorizontal:16, paddingTop:10, flex:1 }}>
@@ -239,6 +326,40 @@ export default function SalesHistoryScreen({ onClose, refreshKey }) {
                 )}
                 ListEmptyComponent={<Text style={{ color:'#888' }}>Sin ítems</Text>}
               />
+              {detail.sale.payment_method === 'transferencia' && (
+              <View style={styles.attachCard}>
+                <Text style={styles.attachTitle}>
+                  {detail.sale.transfer_receipt_uri ? 'Actualizar comprobante' : 'Adjuntar comprobante'}
+                </Text>
+                <View style={styles.attachActions}>
+                    <TouchableOpacity
+                      style={styles.attachBtn}
+                      onPress={attachFromCamera}
+                      disabled={attachLoading}
+                    >
+                      <Text style={styles.attachBtnText}>Camara</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.attachBtn}
+                      onPress={attachFromLibrary}
+                      disabled={attachLoading}
+                    >
+                      <Text style={styles.attachBtnText}>Galeria</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.attachBtn}
+                      onPress={attachFromFile}
+                      disabled={attachLoading}
+                    >
+                    <Text style={styles.attachBtnText}>Archivo</Text>
+                  </TouchableOpacity>
+                </View>
+                {!detail.sale.transfer_receipt_uri && !attachLoading && (
+                  <Text style={styles.attachWarning}>Todavia no se ha cargado un comprobante.</Text>
+                )}
+                {attachLoading && <ActivityIndicator style={{ marginTop: 8 }} />}
+              </View>
+            )}
               {detail.sale.transfer_receipt_uri && (
                 <View style={styles.proofCard}>
                   <Text style={{ fontWeight:'700', marginBottom:6 }}>Comprobante adjunto</Text>
@@ -295,12 +416,20 @@ const styles = StyleSheet.create({
   chip:{ borderWidth:1, borderColor:'#ccc', borderRadius:999, paddingHorizontal:10, paddingVertical:6, backgroundColor:'#fff' },
   chipOn:{ backgroundColor:'#111', borderColor:'#111' },
   chipMini:{ borderWidth:1, borderColor:'#eee', borderRadius:999, paddingHorizontal:10, paddingVertical:4, backgroundColor:'#fff' },
-  saleRow:{ flexDirection:'row', alignItems:'center', paddingVertical:10, borderBottomWidth:1, borderColor:'#eee' },
+  saleRow:{ flexDirection:'row', alignItems:'center', paddingVertical:10, borderBottomWidth:1, borderColor:'#eee', backgroundColor:'#fff' },
+  saleRowMissing:{ backgroundColor:'#fff4f4', borderColor:'#f4b4bf' },
   saleTitle:{ fontWeight:'700' },
   saleSub:{ color:'#666' },
+  saleWarning:{ color:'#b00020', fontWeight:'600', marginTop:4 },
   saleGo:{ fontSize:22, color:'#999', marginLeft:8 },
   itemRow:{ flexDirection:'row', alignItems:'center', justifyContent:'space-between', paddingVertical:8, borderBottomWidth:1, borderColor:'#eee' },
   clearBtn:{ borderWidth:1, borderColor:'#e6e6e6', paddingHorizontal:12, paddingVertical:6, borderRadius:999, backgroundColor:'#fff' },
+  attachCard:{ borderWidth:1, borderColor:'#eee', borderRadius:12, padding:12, backgroundColor:'#fff', marginTop:12, gap:8 },
+  attachTitle:{ fontWeight:'700', color:'#333' },
+  attachActions:{ flexDirection:'row', gap:8, flexWrap:'wrap' },
+  attachBtn:{ borderWidth:1, borderColor:'#d8e7ff', borderRadius:10, paddingHorizontal:12, paddingVertical:6, backgroundColor:'#eef6ff' },
+  attachBtnText:{ color:theme.colors.primary, fontWeight:'600' },
+  attachWarning:{ color:'#b00020', fontWeight:'600', marginTop:4 },
   proofCard:{ borderWidth:1, borderColor:'#eee', borderRadius:12, padding:12, backgroundColor:'#fafafa', marginTop:12, alignItems:'flex-start', gap:8 },
   proofName:{ fontWeight:'600', color:'#333' },
   proofImage:{ width:120, height:120, borderRadius:12 },
@@ -310,3 +439,6 @@ const styles = StyleSheet.create({
   previewBg:{ flex:1, backgroundColor:'rgba(0,0,0,0.8)', alignItems:'center', justifyContent:'center', padding:20 },
   previewImage:{ width:'100%', height:'100%' },
 });
+
+
+

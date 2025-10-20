@@ -4,12 +4,30 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 const CURRENT_USER_KEY = 'current_user';
 const USERS_LIST_KEY = 'users_list';
 
-// Usuarios por defecto (todos admins)
-const DEFAULT_USERS = [
-  { id: 1, name: 'Admin Principal', pin: '1234', role: 'admin', isActive: true },
-  { id: 2, name: 'Usuario 2', pin: '5678', role: 'admin', isActive: true },
-  { id: 3, name: 'Usuario 3', pin: '9999', role: 'admin', isActive: true },
-];
+const DEFAULT_USER_NAMES = ['MARIANA', 'INGRID', 'ALFREDO', 'FABRICIO', 'MARIA', 'PRUEBAS'];
+const DEFAULT_USERS = DEFAULT_USER_NAMES.map((name, index) => ({
+  id: index + 1,
+  name,
+  role: 'admin',
+  isActive: true,
+  createdAt: new Date().toISOString(),
+}));
+
+function sanitizeUsers(users = []) {
+  return users
+    .map((user, index) => {
+      const name = String(user?.name || '').trim().toUpperCase();
+      if (!name) return null;
+      return {
+        id: user?.id ?? Date.now() + index,
+        name,
+        role: user?.role || 'admin',
+        isActive: user?.isActive !== false,
+        createdAt: user?.createdAt || new Date().toISOString(),
+      };
+    })
+    .filter(Boolean);
+}
 
 export class AuthManagerClass {
   static async initializeUsers() {
@@ -17,10 +35,18 @@ export class AuthManagerClass {
       const existingUsers = await AsyncStorage.getItem(USERS_LIST_KEY);
       if (!existingUsers) {
         await AsyncStorage.setItem(USERS_LIST_KEY, JSON.stringify(DEFAULT_USERS));
-        console.log('🔧 Usuarios por defecto creados');
+        console.log('Usuarios por defecto creados');
         return DEFAULT_USERS;
       }
-      return JSON.parse(existingUsers);
+      const parsed = JSON.parse(existingUsers);
+      const clean = sanitizeUsers(parsed);
+      if (!clean.length) {
+        await AsyncStorage.setItem(USERS_LIST_KEY, JSON.stringify(DEFAULT_USERS));
+        return DEFAULT_USERS;
+      }
+      // Migracion desde versiones con PIN u otros campos
+      await AsyncStorage.setItem(USERS_LIST_KEY, JSON.stringify(clean));
+      return clean;
     } catch (error) {
       console.error('Error inicializando usuarios:', error);
       return DEFAULT_USERS;
@@ -30,7 +56,10 @@ export class AuthManagerClass {
   static async getAllUsers() {
     try {
       const users = await AsyncStorage.getItem(USERS_LIST_KEY);
-      return users ? JSON.parse(users) : DEFAULT_USERS;
+      if (!users) return DEFAULT_USERS;
+      const clean = sanitizeUsers(JSON.parse(users));
+      if (!clean.length) return DEFAULT_USERS;
+      return clean;
     } catch (error) {
       console.error('Error obteniendo usuarios:', error);
       return DEFAULT_USERS;
@@ -40,16 +69,21 @@ export class AuthManagerClass {
   static async addUser(userData) {
     try {
       const users = await this.getAllUsers();
+      const cleanUsers = sanitizeUsers(users);
+      const cleanName = String(userData?.name || '').trim().toUpperCase();
+      if (!cleanName) throw new Error('Nombre invalido');
+      if (cleanUsers.some(u => u.name === cleanName)) {
+        throw new Error('El usuario ya existe');
+      }
       const newUser = {
         id: Date.now(),
-        name: userData.name,
-        pin: userData.pin,
+        name: cleanName,
         role: 'admin',
         isActive: true,
         createdAt: new Date().toISOString(),
       };
-      users.push(newUser);
-      await AsyncStorage.setItem(USERS_LIST_KEY, JSON.stringify(users));
+      cleanUsers.push(newUser);
+      await AsyncStorage.setItem(USERS_LIST_KEY, JSON.stringify(cleanUsers));
       return newUser;
     } catch (error) {
       console.error('Error agregando usuario:', error);
@@ -57,12 +91,45 @@ export class AuthManagerClass {
     }
   }
 
-  static async validateCredentials(name, pin) {
+  static async updateUserName(userId, newName) {
+    try {
+      const cleanName = newName.trim().toUpperCase();
+      if (!cleanName) throw new Error('Nombre invalido');
+
+      const users = await this.getAllUsers();
+      const idx = users.findIndex(u => u.id === userId);
+      if (idx === -1) throw new Error('Usuario no encontrado');
+
+      if (users.some((u, i) => i !== idx && u.name === cleanName)) {
+        throw new Error('El usuario ya existe');
+      }
+
+      users[idx] = {
+        ...users[idx],
+        name: cleanName,
+        updatedAt: new Date().toISOString(),
+      };
+
+      await AsyncStorage.setItem(USERS_LIST_KEY, JSON.stringify(users));
+
+      const currentUser = await this.getCurrentUser();
+      if (currentUser?.id === userId) {
+        const updatedCurrent = { ...currentUser, name: cleanName };
+        await AsyncStorage.setItem(CURRENT_USER_KEY, JSON.stringify(updatedCurrent));
+      }
+
+      return users[idx];
+    } catch (error) {
+      console.error('Error actualizando nombre:', error);
+      throw error;
+    }
+  }
+
+  static async validateCredentials(name) {
     try {
       const users = await this.getAllUsers();
-      const user = users.find(u => 
-        u.name.toLowerCase() === name.toLowerCase() && 
-        u.pin === pin && 
+      const user = users.find(u =>
+        u.name.toLowerCase() === name.trim().toLowerCase() &&
         u.isActive
       );
       return user || null;
@@ -80,7 +147,7 @@ export class AuthManagerClass {
         sessionId: Date.now().toString(),
       };
       await AsyncStorage.setItem(CURRENT_USER_KEY, JSON.stringify(loginData));
-      console.log(`✅ Login exitoso: ${user.name}`);
+      console.log(`Login exitoso: ${user.name}`);
       return loginData;
     } catch (error) {
       console.error('Error en login:', error);
@@ -91,7 +158,7 @@ export class AuthManagerClass {
   static async logout() {
     try {
       await AsyncStorage.removeItem(CURRENT_USER_KEY);
-      console.log('🚪 Usuario cerró sesión');
+      console.log('Usuario cerro sesion');
     } catch (error) {
       console.error('Error en logout:', error);
     }
@@ -125,7 +192,6 @@ export class AuthManagerClass {
   }
 }
 
-// Crear instancia singleton
 const AuthManager = AuthManagerClass;
 
 export default AuthManager;
