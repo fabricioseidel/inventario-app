@@ -72,7 +72,7 @@ const CashHistoryScreen = ({ onBack }) => {
         </View>
         <View style={styles.transactionAmount}>
           <Text style={[
-            styles.amountText, 
+            styles.amountText,
             { color: getAmountColor(item.type, item.amount) }
           ]}>
             {item.amount < 0 ? '-' : ''}${formatAmount(item.amount)}

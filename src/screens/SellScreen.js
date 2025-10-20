@@ -18,7 +18,7 @@ import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 
 import ScannerScreen from './ScannerScreen';
-import { getProductByBarcode, recordSale, searchProductsForSale } from '../db';
+import { getProductByBarcode, recordSale } from '../db';
 import { theme } from '../ui/Theme';
 import { copyFileToDocuments, getFileDisplayName } from '../utils/media';
 
@@ -31,7 +31,6 @@ export default function SellScreen({
   pendingBarcode,
   recentlyCreatedBarcode,
   onConsumeRecentBarcode,
-  currentUser, // Nuevo prop
 }) {
   const { width } = useWindowDimensions();
   const isCompact = width < 380;
@@ -243,8 +242,6 @@ export default function SellScreen({
         amountPaid: Number(amountPaid || 0),
         transferReceiptUri: proof?.uri || null,
         transferReceiptName: proof?.name || null,
-        userId: currentUser?.id?.toString() || null,
-        userName: currentUser?.name || null,
       };
       await recordSale(cart, payload);
       Alert.alert(

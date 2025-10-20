@@ -159,6 +159,16 @@ export default function CashManagementScreen({ currentUser, onClose }) {
         return;
       }
       
+      // 🆕 Validación: No se puede retirar más de lo disponible en caja fuerte
+      if (safeAction === 'withdraw' && amount > safeBalance) {
+        Alert.alert(
+          'Saldo insuficiente',
+          `No puedes retirar $${amount.toLocaleString()}\n\nSaldo disponible en caja fuerte: $${safeBalance.toLocaleString()}\n\n💡 Reduce el monto o realiza un depósito primero.`,
+          [{ text: 'Entendido' }]
+        );
+        return;
+      }
+      
       if (safeAction === 'deposit') {
         await depositToSafe(amount, description, null, currentUser.id, currentUser.name);
       } else {
@@ -302,7 +312,16 @@ export default function CashManagementScreen({ currentUser, onClose }) {
       <Modal visible={showOpenModal} transparent animationType="slide">
         <View style={styles.modalOverlay}>
           <View style={styles.modal}>
-            <Text style={styles.modalTitle}>🔓 Abrir Caja</Text>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>🔓 Abrir Caja</Text>
+              <TouchableOpacity 
+                onPress={() => setShowOpenModal(false)}
+                style={styles.closeModalButton}
+              >
+                <Text style={styles.closeModalText}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            
             <Text style={styles.label}>Monto inicial</Text>
             <TextInput
               style={styles.input}
@@ -318,13 +337,13 @@ export default function CashManagementScreen({ currentUser, onClose }) {
                 style={styles.cancelButton} 
                 onPress={() => setShowOpenModal(false)}
               >
-                <Text style={styles.buttonText}>Cancelar</Text>
+                <Text style={styles.cancelButtonText}>Cancelar</Text>
               </TouchableOpacity>
               <TouchableOpacity 
                 style={styles.openButton} 
                 onPress={handleOpenCash}
               >
-                <Text style={styles.buttonText}>Abrir</Text>
+                <Text style={styles.buttonTextWhite}>Abrir</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -335,7 +354,15 @@ export default function CashManagementScreen({ currentUser, onClose }) {
       <Modal visible={showCloseModal} transparent animationType="slide">
         <View style={styles.modalOverlay}>
           <View style={styles.modal}>
-            <Text style={styles.modalTitle}>🔒 Cerrar Caja</Text>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>🔒 Cerrar Caja</Text>
+              <TouchableOpacity 
+                onPress={() => setShowCloseModal(false)}
+                style={styles.closeModalButton}
+              >
+                <Text style={styles.closeModalText}>✕</Text>
+              </TouchableOpacity>
+            </View>
             
             {cashData && cashData.expectedAmount !== undefined && (
               <View style={styles.expectedSection}>
@@ -370,13 +397,13 @@ export default function CashManagementScreen({ currentUser, onClose }) {
                 style={styles.cancelButton} 
                 onPress={() => setShowCloseModal(false)}
               >
-                <Text style={styles.buttonText}>Cancelar</Text>
+                <Text style={styles.cancelButtonText}>Cancelar</Text>
               </TouchableOpacity>
               <TouchableOpacity 
-                style={styles.closeButton} 
+                style={styles.closeButtonModal} 
                 onPress={handleCloseCash}
               >
-                <Text style={styles.buttonText}>Cerrar Caja</Text>
+                <Text style={styles.buttonTextWhite}>Cerrar Caja</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -387,9 +414,17 @@ export default function CashManagementScreen({ currentUser, onClose }) {
       <Modal visible={showSafeModal} transparent animationType="slide">
         <View style={styles.modalOverlay}>
           <View style={styles.modal}>
-            <Text style={styles.modalTitle}>
-              {safeAction === 'deposit' ? '💰 Depositar' : '💸 Retirar'}
-            </Text>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>
+                {safeAction === 'deposit' ? '💰 Depositar' : '💸 Retirar'}
+              </Text>
+              <TouchableOpacity 
+                onPress={() => setShowSafeModal(false)}
+                style={styles.closeModalButton}
+              >
+                <Text style={styles.closeModalText}>✕</Text>
+              </TouchableOpacity>
+            </View>
             
             <Text style={styles.label}>Monto</Text>
             <TextInput
@@ -408,6 +443,7 @@ export default function CashManagementScreen({ currentUser, onClose }) {
               onChangeText={setDescription}
               placeholder="Motivo del movimiento"
               multiline
+              numberOfLines={3}
             />
             
             <View style={styles.modalButtons}>
@@ -415,18 +451,18 @@ export default function CashManagementScreen({ currentUser, onClose }) {
                 style={styles.cancelButton} 
                 onPress={() => setShowSafeModal(false)}
               >
-                <Text style={styles.buttonText}>Cancelar</Text>
+                <Text style={styles.cancelButtonText}>Cancelar</Text>
               </TouchableOpacity>
               <TouchableOpacity 
                 style={[
                   styles.modalActionButton, 
                   safeAction === 'deposit' 
-                    ? {backgroundColor: theme.colors.success} 
-                    : {backgroundColor: theme.colors.warning}
+                    ? styles.depositActionButton
+                    : styles.withdrawActionButton
                 ]} 
                 onPress={handleSafeTransaction}
               >
-                <Text style={styles.buttonText}>
+                <Text style={styles.buttonTextWhite}>
                   {safeAction === 'deposit' ? 'Depositar' : 'Retirar'}
                 </Text>
               </TouchableOpacity>
@@ -533,7 +569,6 @@ const styles = StyleSheet.create({
   },
   safeButtons: {
     flexDirection: 'row',
-    gap: 12,
     marginTop: 12,
   },
   openButton: {
@@ -541,6 +576,16 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderRadius: 8,
     alignItems: 'center',
+    flex: 1,
+    marginLeft: 6,
+  },
+  closeButtonModal: {
+    backgroundColor: theme.colors.danger,
+    paddingVertical: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+    flex: 1,
+    marginLeft: 6,
   },
   depositButton: {
     backgroundColor: theme.colors.success,
@@ -549,14 +594,16 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     alignItems: 'center',
     flex: 1,
+    marginRight: 6,
   },
   withdrawButton: {
-    backgroundColor: theme.colors.warning,
+    backgroundColor: '#F57C00', // Naranja oscuro
     paddingVertical: 12,
     paddingHorizontal: 16,
     borderRadius: 8,
     alignItems: 'center',
     flex: 1,
+    marginLeft: 6,
   },
   buttonTextWhite: {
     color: 'white',
@@ -587,12 +634,26 @@ const styles = StyleSheet.create({
     width: '90%',
     maxWidth: 400,
   },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
   modalTitle: {
     fontSize: 20,
     fontWeight: 'bold',
     color: theme.colors.primary,
-    marginBottom: 16,
-    textAlign: 'center',
+    flex: 1,
+  },
+  closeModalButton: {
+    padding: 4,
+    marginLeft: 8,
+  },
+  closeModalText: {
+    fontSize: 24,
+    color: theme.colors.textSecondary,
+    fontWeight: 'bold',
   },
   expectedSection: {
     backgroundColor: theme.colors.backgroundSecondary,
@@ -616,27 +677,41 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: theme.colors.border,
     borderRadius: 8,
-    padding: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
     fontSize: 16,
     marginBottom: 16,
     backgroundColor: 'white',
   },
   modalButtons: {
     flexDirection: 'row',
-    gap: 12,
+    marginTop: 8,
   },
   cancelButton: {
     flex: 1,
-    backgroundColor: theme.colors.textSecondary,
+    backgroundColor: '#E0E0E0',
     paddingVertical: 12,
     borderRadius: 8,
     alignItems: 'center',
+    marginRight: 6,
+  },
+  cancelButtonText: {
+    color: '#333',
+    fontWeight: 'bold',
+    fontSize: 16,
   },
   modalActionButton: {
     flex: 1,
     paddingVertical: 12,
     borderRadius: 8,
     alignItems: 'center',
+    marginLeft: 6,
+  },
+  depositActionButton: {
+    backgroundColor: theme.colors.success, // Verde oscuro
+  },
+  withdrawActionButton: {
+    backgroundColor: '#F57C00', // Naranja oscuro (buen contraste con blanco)
   },
   buttonText: {
     color: 'white',

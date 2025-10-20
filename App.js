@@ -1,5 +1,5 @@
 // App.js
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   SafeAreaView, View, Text, FlatList, StyleSheet, Alert, Modal,
   TextInput, TouchableOpacity, Keyboard, Platform, Image, useWindowDimensions
@@ -56,6 +56,7 @@ export default function App() {
   const [saleRequestedBarcode, setSaleRequestedBarcode] = useState(null);
   const [recentlyCreatedBarcode, setRecentlyCreatedBarcode] = useState(null);
   const [initError, setInitError] = useState(null);
+  const searchRequestRef = useRef(0);
 
   const { width } = useWindowDimensions();
   const isCompact = width < 380;
@@ -108,7 +109,7 @@ export default function App() {
     );
   }, [currentUser]);
 
-  // Cargar solo el contador de productos
+  // Refrescar inventario y contador
   const loadProductCount = useCallback(async () => {
     try {
       const count = await getProductsCount('');
@@ -120,37 +121,56 @@ export default function App() {
   }, []);
 
   // Búsqueda de productos (máximo 20)
+    // Busqueda de productos (maximo 20)
   const searchProducts = useCallback(async (searchText) => {
-    if (!searchText || searchText.trim().length === 0) {
-      setProducts([]);
-      setSearch('');
+    const requestId = ++searchRequestRef.current;
+    const normalized = (searchText || '').trim();
+
+    if (!normalized.length) {
+      if (requestId === searchRequestRef.current) {
+        setProducts([]);
+        setIsSearching(false);
+      }
       return;
     }
 
-    setIsSearching(true);
+    if (requestId === searchRequestRef.current) {
+      setIsSearching(true);
+    }
+
     try {
-      console.log('🔍 Buscando:', searchText);
-      const results = await listProducts(0, 20, searchText);
-      console.log('✅ Encontrados:', results.length);
-      setProducts(results);
-      setSearch(searchText);
+      console.log('Buscando:', normalized);
+      const results = await listProducts(0, 20, normalized);
+      console.log('Encontrados:', results.length);
+      if (requestId === searchRequestRef.current) {
+        setProducts(results);
+      }
     } catch (err) {
-      console.error('❌ Error búsqueda:', err);
+      console.error('Error busqueda:', err);
       Alert.alert('Error', 'No se pudo buscar: ' + (err?.message || String(err)));
     } finally {
-      setIsSearching(false);
+      if (requestId === searchRequestRef.current) {
+        setIsSearching(false);
+      }
     }
   }, []);
 
+  const refreshInventory = useCallback(async () => {
+    const term = search;
+    await searchProducts(term);
+    await loadProductCount();
+  }, [loadProductCount, search, searchProducts]);
+
   // Handler del TextInput
   const handleSearchChange = useCallback((newSearch) => {
+    setSearch(newSearch);
     if (newSearch.trim().length === 0) {
-      // Load all products (limited to 20)
       searchProducts('');
       return;
     }
     searchProducts(newSearch);
   }, [searchProducts]);
+
 
   useEffect(() => {
     // Solo inicializar si está logueado
@@ -179,8 +199,8 @@ export default function App() {
         // Inicializar la base de datos
         await initDB();
         
-        // Cargar solo el contador de productos
-        await loadProductCount();
+        // Refrescar inventario y contador
+        await refreshInventory();
         
         // Todo se completó correctamente, actualizar estado
         setReady(true);
@@ -190,7 +210,7 @@ export default function App() {
           InteractionManager.runAfterInteractions(async () => {
             try { 
               await syncNow(); 
-              await loadProductCount(); 
+              await refreshInventory(); 
               initRealtimeSync();
             } catch (e) {
               console.warn('Error en sincronización inicial:', e);
@@ -216,14 +236,14 @@ export default function App() {
       if (!ready) return; // No sincronizar si aún no está listo
       try { 
         await syncNow(); 
-        await loadProductCount(); 
+        await refreshInventory(); 
       } catch (e) {
         console.warn('Error en sincronización automática:', e);
       }
     }, 5 * 60 * 1000);
     
     return () => clearInterval(syncInterval);
-  }, [loadProductCount, isLoggedIn, ready]);
+  }, [isLoggedIn, ready, refreshInventory]);
 
   const onCreate = useCallback(() => {
     setSaleRequestedBarcode(null);
@@ -255,14 +275,14 @@ export default function App() {
         }
       }
     ]);
-  }, [loadProductCount]);
+  }, [refreshInventory]);
 
   const manualSync = useCallback(async () => {
     setIsSyncLoading(true);
     try {
       console.log('🔄 Iniciando sincronización manual...');
       await syncNow();
-      await loadProductCount();
+      await refreshInventory();
 
       console.log('🔄 Sincronización completada, refrescando reportes...');
 
@@ -276,7 +296,7 @@ export default function App() {
     } finally {
       setIsSyncLoading(false);
     }
-  }, [loadProductCount]);
+  }, [refreshInventory]);
 
   const handleOpenNewProductFromSale = useCallback((barcode) => {
     setSaleRequestedBarcode(String(barcode));
@@ -457,7 +477,7 @@ export default function App() {
         <View style={[styles.content, isCompact && { paddingHorizontal: 12 }] }>
           <SellScreen
             onClose={() => {}}
-            onSold={async ()=>{ await refresh(); try{ await syncNow(); } catch{} }}
+            onSold={async ()=>{ await refreshInventory(); try{ await syncNow(); } catch{} }}
             onRequestCreateProduct={handleOpenNewProductFromSale}
             pendingBarcode={saleRequestedBarcode}
             recentlyCreatedBarcode={recentlyCreatedBarcode}
