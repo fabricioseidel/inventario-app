@@ -23,6 +23,7 @@
     "expo": "~48.0.21",
     "expo-asset": "~8.9.1",
     "expo-barcode-scanner": "~12.3.2",
+    "expo-dev-client": "^6.0.15",
     "expo-document-picker": "~11.2.1",
     "expo-file-system": "~15.2.2",
     "expo-haptics": "~12.2.1",
