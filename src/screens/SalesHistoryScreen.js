@@ -168,10 +168,18 @@ export default function SalesHistoryScreen({ onClose, refreshKey }) {
 
   const attachFromFile = async () => {
     try {
-      const result = await DocumentPicker.getDocumentAsync({ copyToCacheDirectory: false });
+      const result = await DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true });
       if (result.type !== 'success') return;
-      const name = result.name || getFileDisplayName(result.uri);
-      await persistProof(result.uri, name);
+
+      const pick = Array.isArray(result.assets) && result.assets.length ? result.assets[0] : result;
+      const localUri = pick?.fileCopyUri || pick?.uri;
+      const name = pick?.name || getFileDisplayName(localUri);
+
+      if (!localUri) {
+        Alert.alert('Error', 'No se pudo acceder al archivo seleccionado.');
+        return;
+      }
+      await persistProof(localUri, name);
     } catch (error) {
       console.warn('attachFromFile error', error);
       Alert.alert('Error', 'No se pudo adjuntar el archivo.');
