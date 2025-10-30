@@ -7,97 +7,54 @@ import {
   TouchableOpacity,
   Alert,
   ScrollView,
-  Modal,
   TextInput,
+  ActivityIndicator,
 } from 'react-native';
 import AuthManager from '../auth/AuthManager';
 import { theme } from '../ui/Theme';
 
 export default function LoginScreen({ onLoginSuccess }) {
-  const [users, setUsers] = useState([]);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [renameTarget, setRenameTarget] = useState(null);
-  const [renameValue, setRenameValue] = useState('');
-  const [showAdd, setShowAdd] = useState(false);
-  const [newUserName, setNewUserName] = useState('');
-  const [addLoading, setAddLoading] = useState(false);
+  const [suggestedUsers, setSuggestedUsers] = useState([]);
 
   useEffect(() => {
-    loadUsers();
+    loadSuggestedUsers();
   }, []);
 
-  const loadUsers = async () => {
+  const loadSuggestedUsers = async () => {
     try {
-      await AuthManager.initializeUsers();
-      const list = await AuthManager.getAllUsers();
-      setUsers(list);
+      const users = await AuthManager.getAllUsers();
+      setSuggestedUsers(users);
     } catch (error) {
-      console.error('Error cargando usuarios:', error);
-      Alert.alert('Error', 'No se pudo cargar la lista de usuarios.');
+      console.error('Error cargando sugerencias:', error);
     }
   };
 
-  const handleLogin = async (user) => {
+  const handleLogin = async () => {
+    if (!email.trim() || !password.trim()) {
+      Alert.alert('Error', 'Ingresa tu email y contraseña');
+      return;
+    }
+
     setIsLoading(true);
     try {
-      await AuthManager.login(user);
+      const user = await AuthManager.login(email, password);
       Alert.alert('Bienvenido', `Hola ${user.name}`);
       onLoginSuccess && onLoginSuccess(user);
     } catch (error) {
-      Alert.alert('Error', 'No se pudo iniciar sesion.');
+      Alert.alert(
+        'Error de autenticación',
+        error.message || 'Credenciales inválidas'
+      );
     } finally {
       setIsLoading(false);
     }
   };
 
-  const openRename = (user) => {
-    setRenameTarget(user);
-    setRenameValue(user.name);
-  };
-
-  const closeRename = () => {
-    setRenameTarget(null);
-    setRenameValue('');
-  };
-
-  const handleRename = async () => {
-    const newName = renameValue.trim();
-    if (!newName) {
-      Alert.alert('Nombre requerido', 'Ingresa un nombre valido.');
-      return;
-    }
-
-    try {
-      await AuthManager.updateUserName(renameTarget.id, newName);
-      closeRename();
-      loadUsers();
-    } catch (error) {
-      Alert.alert('Error', error?.message || 'No se pudo actualizar el nombre.');
-    }
-  };
-
-  const openAdd = () => {
-    setNewUserName('');
-    setShowAdd(true);
-  };
-
-  const handleAddUser = async () => {
-    const candidate = newUserName.trim();
-    if (!candidate) {
-      Alert.alert('Nombre requerido', 'Ingresa un nombre valido.');
-      return;
-    }
-    setAddLoading(true);
-    try {
-      await AuthManager.addUser({ name: candidate });
-      setShowAdd(false);
-      setNewUserName('');
-      await loadUsers();
-    } catch (error) {
-      Alert.alert('Error', error?.message || 'No se pudo crear el usuario.');
-    } finally {
-      setAddLoading(false);
-    }
+  const handleSelectUser = (userEmail) => {
+    setEmail(userEmail);
   };
 
   return (
@@ -105,106 +62,73 @@ export default function LoginScreen({ onLoginSuccess }) {
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.header}>
           <Text style={styles.title}>OlivoMarket</Text>
-          <Text style={styles.subtitle}>Selecciona tu usuario para comenzar</Text>
+          <Text style={styles.subtitle}>Inicia sesión para continuar</Text>
         </View>
 
-        <View style={styles.list}>
-          {users.map((user) => (
-            <View key={user.id} style={styles.userCard}>
-              <TouchableOpacity
-                style={[styles.loginBtn, (isLoading || addLoading) && styles.loginBtnDisabled]}
-                onPress={() => handleLogin(user)}
-                disabled={isLoading || addLoading}
-              >
-                <Text style={styles.loginBtnText}>{user.name}</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.renameBtn}
-                onPress={() => openRename(user)}
-                disabled={isLoading || addLoading}
-              >
-                <Text style={styles.renameBtnText}>Renombrar</Text>
-              </TouchableOpacity>
+        <View style={styles.form}>
+          <View style={styles.inputGroup}>
+            <Text style={styles.label}>Email</Text>
+            <TextInput
+              style={styles.input}
+              value={email}
+              onChangeText={setEmail}
+              placeholder="vendedor@tienda.local"
+              keyboardType="email-address"
+              autoCapitalize="none"
+              autoCorrect={false}
+              editable={!isLoading}
+            />
+          </View>
+
+          <View style={styles.inputGroup}>
+            <Text style={styles.label}>Contraseña</Text>
+            <TextInput
+              style={styles.input}
+              value={password}
+              onChangeText={setPassword}
+              placeholder="••••••••"
+              secureTextEntry
+              editable={!isLoading}
+            />
+          </View>
+
+          <TouchableOpacity
+            style={[styles.loginBtn, isLoading && styles.loginBtnDisabled]}
+            onPress={handleLogin}
+            disabled={isLoading}
+          >
+            {isLoading ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Text style={styles.loginBtnText}>Iniciar Sesión</Text>
+            )}
+          </TouchableOpacity>
+        </View>
+
+        {suggestedUsers.length > 0 && (
+          <View style={styles.suggestions}>
+            <Text style={styles.suggestionsTitle}>Usuarios disponibles:</Text>
+            <View style={styles.suggestionsList}>
+              {suggestedUsers.map((user) => (
+                <TouchableOpacity
+                  key={user.email}
+                  style={styles.suggestionChip}
+                  onPress={() => handleSelectUser(user.email)}
+                  disabled={isLoading}
+                >
+                  <Text style={styles.suggestionName}>{user.name}</Text>
+                  <Text style={styles.suggestionEmail}>{user.email}</Text>
+                </TouchableOpacity>
+              ))}
             </View>
-          ))}
-        </View>
-
-        <TouchableOpacity
-          style={styles.addUserBtn}
-          onPress={openAdd}
-          disabled={isLoading || addLoading}
-        >
-          <Text style={styles.addUserBtnText}>+ Crear nuevo usuario</Text>
-        </TouchableOpacity>
+          </View>
+        )}
 
         <Text style={styles.hint}>
-          Usuarios internos sin PIN. Puedes renombrarlos o crear nuevos usuarios en cualquier momento.
+          Contraseña temporal: <Text style={styles.hintBold}>Venta2025</Text>
+          {'\n'}Cámbiala después del primer acceso.
         </Text>
       </ScrollView>
-
-      <Modal visible={!!renameTarget} transparent animationType="fade">
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Renombrar usuario</Text>
-            <Text style={styles.modalSubtitle}>
-              {renameTarget ? `Usuario actual: ${renameTarget.name}` : ''}
-            </Text>
-            <TextInput
-              style={styles.input}
-              value={renameValue}
-              onChangeText={setRenameValue}
-              placeholder="Nuevo nombre"
-              autoCapitalize="characters"
-            />
-            <View style={styles.modalButtons}>
-              <TouchableOpacity style={styles.modalBtn} onPress={closeRename} disabled={isLoading}>
-                <Text style={styles.modalBtnText}>Cancelar</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.modalBtn, styles.modalBtnPrimary]}
-                onPress={handleRename}
-                disabled={isLoading}
-              >
-                <Text style={[styles.modalBtnText, styles.modalBtnTextPrimary]}>Guardar</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
-
-      <Modal visible={showAdd} transparent animationType="fade">
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Nuevo usuario</Text>
-            <Text style={styles.modalSubtitle}>Ingresa un nombre unico</Text>
-            <TextInput
-              style={styles.input}
-              value={newUserName}
-              onChangeText={setNewUserName}
-              placeholder="Nombre"
-              autoCapitalize="characters"
-            />
-            <View style={styles.modalButtons}>
-              <TouchableOpacity
-                style={styles.modalBtn}
-                onPress={() => setShowAdd(false)}
-                disabled={addLoading}
-              >
-                <Text style={styles.modalBtnText}>Cancelar</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.modalBtn, styles.modalBtnPrimary]}
-                onPress={handleAddUser}
-                disabled={addLoading}
-              >
-                <Text style={[styles.modalBtnText, styles.modalBtnTextPrimary]}>
-                  {addLoading ? 'Guardando...' : 'Guardar'}
-                </Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
     </View>
   );
 }
@@ -222,7 +146,7 @@ const styles = StyleSheet.create({
   },
   header: {
     alignItems: 'center',
-    marginBottom: 32,
+    marginBottom: 40,
   },
   title: {
     fontSize: 32,
@@ -235,21 +159,39 @@ const styles = StyleSheet.create({
     color: theme.colors.textMuted,
     textAlign: 'center',
   },
-  list: {
-    gap: 16,
+  form: {
+    gap: 20,
   },
-  userCard: {
-    backgroundColor: '#fff',
-    borderRadius: 14,
-    padding: 16,
+  inputGroup: {
+    gap: 8,
+  },
+  label: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: theme.colors.text,
+    marginLeft: 4,
+  },
+  input: {
     borderWidth: 1,
-    borderColor: '#e6e6e6',
+    borderColor: '#dcdcdc',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    fontSize: 16,
+    backgroundColor: '#fff',
+    color: theme.colors.text,
   },
   loginBtn: {
     backgroundColor: theme.colors.primary,
-    paddingVertical: 14,
-    borderRadius: 10,
+    paddingVertical: 16,
+    borderRadius: 12,
     alignItems: 'center',
+    marginTop: 12,
+    shadowColor: theme.colors.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
   },
   loginBtnDisabled: {
     opacity: 0.6,
@@ -259,94 +201,52 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '700',
   },
-  renameBtn: {
-    marginTop: 10,
-    alignSelf: 'center',
-    paddingVertical: 4,
-    paddingHorizontal: 8,
+  suggestions: {
+    marginTop: 32,
   },
-  renameBtnText: {
-    color: theme.colors.textMuted,
-    fontSize: 12,
+  suggestionsTitle: {
+    fontSize: 14,
     fontWeight: '600',
-    textDecorationLine: 'underline',
+    color: theme.colors.textMuted,
+    marginBottom: 12,
+    textAlign: 'center',
   },
-  addUserBtn: {
-    marginTop: 24,
-    alignSelf: 'center',
+  suggestionsList: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: 10,
+  },
+  suggestionChip: {
+    backgroundColor: '#fff',
     borderWidth: 1,
-    borderColor: '#d8e7ff',
-    paddingHorizontal: 20,
+    borderColor: '#e6e6e6',
+    borderRadius: 10,
+    paddingHorizontal: 14,
     paddingVertical: 10,
-    borderRadius: 999,
-    backgroundColor: '#eef6ff',
+    alignItems: 'center',
+    minWidth: 100,
   },
-  addUserBtnText: {
-    color: theme.colors.primary,
+  suggestionName: {
+    fontSize: 14,
     fontWeight: '700',
+    color: theme.colors.primary,
+  },
+  suggestionEmail: {
+    fontSize: 11,
+    color: theme.colors.textMuted,
+    marginTop: 2,
   },
   hint: {
     marginTop: 24,
     color: theme.colors.textMuted,
     textAlign: 'center',
+    fontSize: 13,
+    lineHeight: 18,
   },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 24,
-  },
-  modalCard: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 20,
-    width: '100%',
-    maxWidth: 360,
-  },
-  modalTitle: {
-    fontSize: 20,
+  hintBold: {
     fontWeight: '700',
-    marginBottom: 4,
-    color: theme.colors.text,
-  },
-  modalSubtitle: {
-    fontSize: 14,
-    color: theme.colors.textMuted,
-    marginBottom: 16,
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: '#dcdcdc',
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    fontSize: 16,
-    backgroundColor: '#fff',
-  },
-  modalButtons: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    gap: 12,
-    marginTop: 20,
-  },
-  modalBtn: {
-    paddingVertical: 10,
-    paddingHorizontal: 18,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#dcdcdc',
-    backgroundColor: '#fff',
-  },
-  modalBtnPrimary: {
-    backgroundColor: theme.colors.primary,
-    borderColor: theme.colors.primary,
-  },
-  modalBtnText: {
-    color: theme.colors.text,
-    fontWeight: '600',
-  },
-  modalBtnTextPrimary: {
-    color: '#fff',
+    color: theme.colors.primary,
   },
 });
+

@@ -8,6 +8,7 @@ import {
   listLocalProductsUpdatedAfter, listProducts, listCategories,
   insertSaleFromCloud, insertOrUpdateProduct, getLastSaleTs
 } from './db';
+import { AuthManager } from './auth/AuthManager';
 
 const DEVICE_KEY = 'device_id';
 let DEVICE_ID = null;
@@ -32,7 +33,11 @@ export async function pushSales() {
   const pending = await getUnsyncedSales();
   const deviceId = await getDeviceId();
   
-  console.log(`📤 Subiendo ${pending.length} ventas pendientes desde dispositivo: ${deviceId}`);
+  // 🆕 Obtener el usuario actual para enviar como vendedor
+  const currentUser = await AuthManager.getCurrentUser();
+  const sellerName = currentUser?.name || null;
+  
+  console.log(`📤 Subiendo ${pending.length} ventas pendientes desde dispositivo: ${deviceId}, vendedor: ${sellerName || 'desconocido'}`);
   
   for (const s of pending) {
     // 🔧 FIX: Usar el timestamp original de la venta, no el momento del sync
@@ -53,10 +58,11 @@ export async function pushSales() {
       p_device_id: deviceId,
       p_client_sale_id: s.client_sale_id,
       p_items: s.items_json,
-      p_timestamp: originalTimestamp  // 🔧 Enviar timestamp original
+      p_timestamp: originalTimestamp,  // 🔧 Enviar timestamp original
+      p_seller_name: sellerName  // 🆕 Agregar nombre del vendedor
     };
     
-    console.log(`📤 Subiendo venta: ${s.client_sale_id}, total: ${s.total}, timestamp: ${originalTimestamp || 'auto'}`);
+    console.log(`📤 Subiendo venta: ${s.client_sale_id}, total: ${s.total}, vendedor: ${sellerName}, timestamp: ${originalTimestamp || 'auto'}`);
     
     const { data, error } = await supabase.rpc('apply_sale', payload);
     if (error) {
@@ -181,21 +187,22 @@ export async function syncNow() {
   
   try {
     // 1) Subir primero todo lo local
-    console.log('📤 Subiendo productos...');
-    try {
-      await pushProducts();
-    } catch (e) {
-      console.warn('⚠️ Error subiendo productos:', e);
-      // Continuamos con el proceso
-    }
     
-    console.log('📤 Subiendo categorías...');
-    try {
-      await pushCategories();
-    } catch (e) {
-      console.warn('⚠️ Error subiendo categorías:', e);
-      // Continuamos con el proceso
-    }
+    // 🔧 COMENTADO TEMPORALMENTE: No subir productos masivamente al inicio
+    // Solo sincronizar cuando sea necesario (agregar/editar producto individual)
+    // console.log('📤 Subiendo productos...');
+    // try {
+    //   await pushProducts();
+    // } catch (e) {
+    //   console.warn('⚠️ Error subiendo productos:', e);
+    // }
+    
+    // console.log('📤 Subiendo categorías...');
+    // try {
+    //   await pushCategories();
+    // } catch (e) {
+    //   console.warn('⚠️ Error subiendo categorías:', e);
+    // }
     
     console.log('📤 Subiendo ventas...');
     try {
