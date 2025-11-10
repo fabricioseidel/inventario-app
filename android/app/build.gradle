@@ -110,6 +110,9 @@ def reactNativeArchitectures() {
 
 android {
     ndkVersion rootProject.ext.ndkVersion
+    buildFeatures {
+        buildConfig true
+    }
 
     compileSdkVersion rootProject.ext.compileSdkVersion
 

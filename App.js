@@ -15,6 +15,7 @@ import CashHistoryScreen from './src/screens/CashHistoryScreen';
 import QuickScanScreen from './src/screens/QuickScanScreen';
 import LoginScreen from './src/screens/LoginScreen';
 import CashManagementScreen from './src/screens/CashManagementScreen';
+import SettingsScreen from './src/screens/SettingsScreen';
 import { exportCSVFile, exportJSONFile } from './src/export';
 
 import Header from './src/ui/Header';
@@ -399,7 +400,7 @@ export default function App() {
         onLogout={handleLogout}
       />
       <TopTabs
-        tabs={[{ key: 'sales', label: 'Ventas' }, { key: 'inventory', label: 'Inventario' }, { key: 'reports', label: 'Reportes' }]}
+        tabs={[{ key: 'sales', label: 'Ventas' }, { key: 'inventory', label: 'Inventario' }, { key: 'reports', label: 'Reportes' }, { key: 'settings', label: 'Ajustes' }]}
         current={tab}
         onChange={setTab}
       />
@@ -523,6 +524,12 @@ export default function App() {
               <Text style={styles.reportDesc}>Transacciones, apertura, cierre y movimientos de efectivo.</Text>
             </TouchableOpacity>
           </View>
+        </View>
+      )}
+
+      {tab === 'settings' && (
+        <View style={styles.content}>
+          <SettingsScreen />
         </View>
       )}
 
