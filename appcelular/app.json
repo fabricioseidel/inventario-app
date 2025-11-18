@@ -1,0 +1,39 @@
+{
+  "expo": {
+    "name": "Inventario App",
+    "slug": "inventario-app",
+    "version": "1.0.0",
+    "runtimeVersion": "48.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "versionCode": 2,
+      "adaptiveIcon": {
+        "backgroundColor": "#FFFFFF"
+      },
+      "permissions": [
+        "android.permission.CAMERA"
+      ],
+      "package": "com.fabriseidel.inventarioapp.v2"
+    },
+    "plugins": [],
+    "updates": {
+      "enabled": false
+    },
+    "extra": {
+      "eas": {
+        "projectId": "a1287fed-302d-49e2-988e-c2709525cdbe"
+      }
+    }
+  }
+}
