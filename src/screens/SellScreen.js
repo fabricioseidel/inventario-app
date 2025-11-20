@@ -19,6 +19,7 @@ import * as DocumentPicker from 'expo-document-picker';
 
 import ScannerScreen from './ScannerScreen';
 import { getProductByBarcode, recordSale } from '../db';
+import { syncNow } from '../sync';
 import { theme } from '../ui/Theme';
 import { copyFileToDocuments, getFileDisplayName } from '../utils/media';
 import { uploadReceiptToSupabase } from '../utils/supabaseStorage';
@@ -344,6 +345,18 @@ export default function SellScreen({
       
       await recordSale(cart, payload);
       console.log(`✅ Venta registrada en local correctamente`);
+      
+      // Sincronizar automáticamente si hay comprobante o se especifique
+      if (receiptUrl) {
+        console.log('⏳ [PASO 4] Sincronizando venta con comprobante a Supabase...');
+        try {
+          await syncNow();
+          console.log('✅ Sincronización completada');
+        } catch (syncError) {
+          console.warn('⚠️ Error en sincronización automática:', syncError.message);
+          // No lanzamos error, la sincronización fallida no debería detener el flujo
+        }
+      }
       
       Alert.alert(
         'Venta registrada',

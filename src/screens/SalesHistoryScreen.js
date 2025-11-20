@@ -7,6 +7,7 @@ import * as Sharing from 'expo-sharing';
 import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
 import { getSaleWithItems, listSalesBetween, exportSalesCSV, voidSale, updateSaleTransferReceipt } from '../db';
+import { syncNow } from '../sync';
 import { theme } from '../ui/Theme';
 import { copyFileToDocuments, getFileDisplayName } from '../utils/media';
 import { uploadReceiptToSupabase } from '../utils/supabaseStorage';
@@ -186,6 +187,16 @@ export default function SalesHistoryScreen({ onClose, refreshKey }) {
       console.log('═══════════════════════════════════════════════════════');
       console.log(`Tipo: ${isLocalFile ? 'Archivo nuevo' : 'URL remota'}`);
       console.log(`URL Final: ${uploadedUrl.substring(0, 60)}...`);
+      
+      // Sincronizar automáticamente después de agregar comprobante
+      console.log('⏳ [PASO 5] Sincronizando venta con Supabase...');
+      try {
+        await syncNow();
+        console.log('✅ Sincronización completada');
+      } catch (syncError) {
+        console.warn('⚠️ Error en sincronización automática:', syncError.message);
+        // No lanzamos error, la sincronización fallida no debería detener el flujo
+      }
       
       Alert.alert('Comprobante', 'Archivo guardado y sincronizado correctamente.');
     } catch (error) {

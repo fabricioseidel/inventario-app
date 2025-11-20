@@ -629,7 +629,7 @@ export function updateSaleTransferReceipt(saleId, proofUri, proofName) {
 
     db().transaction((tx) => {
       tx.executeSql(
-        `UPDATE sales SET transfer_receipt_uri = ?, transfer_receipt_name = ?, is_synced = 0 WHERE id = ?;`,
+        `UPDATE sales SET transfer_receipt_uri = ?, transfer_receipt_name = ? WHERE id = ?;`,
         [uri, name, saleId],
       );
 
