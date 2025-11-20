@@ -414,9 +414,19 @@ export default function SalesHistoryScreen({ onClose, refreshKey }) {
 
       <Modal visible={!!proofPreview} transparent animationType="fade" onRequestClose={() => setProofPreview(null)}>
         <View style={styles.previewBg}>
-          <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={() => setProofPreview(null)}>
-            {proofPreview && <Image source={{ uri: proofPreview }} style={styles.previewImage} resizeMode="contain" />}
+          <TouchableOpacity
+            style={styles.previewClose}
+            onPress={() => setProofPreview(null)}
+          >
+            <Text style={styles.previewCloseText}>✕ Cerrar</Text>
           </TouchableOpacity>
+          {proofPreview && (
+            <Image
+              source={{ uri: proofPreview }}
+              style={styles.previewImage}
+              resizeMode="contain"
+            />
+          )}
         </View>
       </Modal>
     </SafeAreaView>
@@ -454,8 +464,10 @@ const styles = StyleSheet.create({
   proofPlaceholder: { width: 120, height: 120, borderRadius: 12, backgroundColor: '#eef1ff', alignItems: 'center', justifyContent: 'center' },
   proofBtn: { borderWidth: 1, borderColor: '#ddd', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 6, backgroundColor: '#fff' },
   proofBtnTxt: { fontWeight: '600', color: theme.colors.primary },
-  previewBg: { flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', alignItems: 'center', justifyContent: 'center', padding: 20 },
-  previewImage: { width: '100%', height: '100%' },
+  previewBg: { flex: 1, backgroundColor: 'rgba(0,0,0,0.9)', alignItems: 'center', justifyContent: 'center', padding: 20 },
+  previewClose: { position: 'absolute', top: 40, right: 20, backgroundColor: 'rgba(255,255,255,0.9)', paddingHorizontal: 16, paddingVertical: 10, borderRadius: 20, zIndex: 10 },
+  previewCloseText: { color: '#000', fontWeight: '700', fontSize: 16 },
+  previewImage: { width: '100%', height: '80%' },
 });
 
 
