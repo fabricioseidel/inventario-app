@@ -1,11 +1,10 @@
 
 import React from 'react';
 import { View, Button, StyleSheet, Alert } from 'react-native';
-import { useCustomTheme } from '../ui/Theme';
+import { theme } from '../ui/Theme';
 import { backupDatabase, restoreDatabase } from '../export';
 
 const SettingsScreen = () => {
-  const { theme } = useCustomTheme();
 
   const handleBackup = async () => {
     try {

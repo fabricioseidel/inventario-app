@@ -183,6 +183,11 @@ export default function SellScreen({
 
   const attachProofFromLibrary = useCallback(async () => {
     try {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) {
+        Alert.alert('Permiso requerido', 'Activa el acceso a la galería para seleccionar una imagen.');
+        return;
+      }
       const result = await ImagePicker.launchImageLibraryAsync({ quality: 0.8, allowsEditing: true, mediaTypes: ImagePicker.MediaTypeOptions.Images });
       if (result.canceled) return;
       const asset = result.assets?.[0];
