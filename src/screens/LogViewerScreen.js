@@ -9,10 +9,8 @@ import {
   StyleSheet,
   Share,
   SafeAreaView,
-  useWindowDimensions,
 } from 'react-native';
 import { logManager } from '../utils/LogViewer';
-import { COLORS } from '../ui/Theme';
 
 export default function LogViewerScreen({ onClose }) {
   const [logs, setLogs] = useState([]);

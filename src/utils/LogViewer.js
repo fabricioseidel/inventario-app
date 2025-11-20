@@ -119,31 +119,5 @@ class LogManager {
 
 export const logManager = new LogManager();
 
-// Interceptar console.log automáticamente
-const originalLog = console.log;
-const originalWarn = console.warn;
-const originalError = console.error;
-
-console.log = function (...args) {
-  originalLog.apply(console, args);
-  const message = args.join(' ');
-  if (message && !message.includes('RCTLog')) {
-    logManager.log(message);
-  }
-};
-
-console.warn = function (...args) {
-  originalWarn.apply(console, args);
-  const message = args.join(' ');
-  if (message) {
-    logManager.warn(message);
-  }
-};
-
-console.error = function (...args) {
-  originalError.apply(console, args);
-  const message = args.join(' ');
-  if (message) {
-    logManager.error(message);
-  }
-};
+// Nota: No interceptamos console.log automáticamente para evitar loops infinitos
+// Los logs se agregan explícitamente cuando se llama a logManager.log(), etc.
