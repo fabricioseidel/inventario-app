@@ -21,6 +21,7 @@ import ScannerScreen from './ScannerScreen';
 import { getProductByBarcode, recordSale } from '../db';
 import { theme } from '../ui/Theme';
 import { copyFileToDocuments, getFileDisplayName } from '../utils/media';
+import { uploadReceiptToSupabase } from '../utils/supabaseStorage';
 
 const PMETHODS = ['efectivo', 'debito', 'credito', 'transferencia'];
 
@@ -278,11 +279,31 @@ export default function SellScreen({
     }
     const proof = method === 'transferencia' ? transferProof : null;
     try {
+      let receiptUrl = null;
+      let receiptName = null;
+
+      // Si hay comprobante de imagen, subirlo a Supabase Storage
+      if (proof && proof.kind === 'image') {
+        try {
+          console.log('📤 Iniciando carga de comprobante a Supabase...');
+          // Generar un ID temporal para el nombre del archivo
+          const tempSaleId = `temp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+          receiptUrl = await uploadReceiptToSupabase(proof.uri, tempSaleId);
+          receiptName = proof.name;
+          console.log('✅ Comprobante subido exitosamente');
+          console.log('✅ URL pública:', receiptUrl);
+        } catch (uploadError) {
+          console.error('❌ Error subiendo comprobante:', uploadError);
+          Alert.alert('Error', `No se pudo subir el comprobante: ${uploadError.message}\n\nLa venta se registrará sin comprobante.`);
+          // Continuamos sin comprobante
+        }
+      }
+
       const payload = {
         paymentMethod: method,
         amountPaid: Number(amountPaid || 0),
-        transferReceiptUri: proof?.uri || null,
-        transferReceiptName: proof?.name || null,
+        transferReceiptUri: receiptUrl,
+        transferReceiptName: receiptName,
       };
       await recordSale(cart, payload);
       Alert.alert(

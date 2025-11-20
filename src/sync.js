@@ -59,7 +59,9 @@ export async function pushSales() {
       p_client_sale_id: s.client_sale_id,
       p_items: s.items_json,
       p_timestamp: originalTimestamp,  // 🔧 Enviar timestamp original
-      p_seller_name: sellerName  // 🆕 Agregar nombre del vendedor
+      p_seller_name: sellerName,  // 🆕 Agregar nombre del vendedor
+      p_transfer_receipt_uri: s.transfer_receipt_uri || null,  // 🆕 URL pública de comprobante
+      p_transfer_receipt_name: s.transfer_receipt_name || null  // 🆕 Nombre del comprobante
     };
     
     console.log(`📤 Subiendo venta: ${s.client_sale_id}, total: ${s.total}, vendedor: ${sellerName}, timestamp: ${originalTimestamp || 'auto'}`);
