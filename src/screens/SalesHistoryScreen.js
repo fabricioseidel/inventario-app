@@ -9,6 +9,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { getSaleWithItems, listSalesBetween, exportSalesCSV, voidSale, updateSaleTransferReceipt } from '../db';
 import { theme } from '../ui/Theme';
 import { copyFileToDocuments, getFileDisplayName } from '../utils/media';
+import { uploadReceiptToSupabase } from '../utils/supabaseStorage';
 
 const PMETHODS = ['efectivo', 'debito', 'credito', 'transferencia'];
 function startOfDay(d) { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; }
@@ -109,23 +110,37 @@ export default function SalesHistoryScreen({ onClose, refreshKey }) {
     if (!detail?.sale?.id || !localUri) return;
     setAttachLoading(true);
     try {
-      const saved = await copyFileToDocuments(localUri, {
-        folder: 'receipts',
-        prefix: `sale-${detail.sale.id}`,
-      });
-      const named = displayName || getFileDisplayName(localUri) || null;
-      await updateSaleTransferReceipt(detail.sale.id, saved, named);
+      console.log('📤 Subiendo comprobante a Supabase desde historial...');
+      
+      // Subir a Supabase Storage en lugar de guardar localmente
+      let uploadedUrl = null;
+      let uploadedName = null;
+
+      // Si es una imagen, subirla a Supabase
+      if (localUri.startsWith('file://') || localUri.includes('Documents')) {
+        uploadedUrl = await uploadReceiptToSupabase(localUri, detail.sale.id);
+        uploadedName = displayName || getFileDisplayName(localUri) || null;
+        console.log('✅ Comprobante subido exitosamente');
+        console.log('✅ URL: ', uploadedUrl);
+      } else {
+        // Si ya es una URL (de otro dispositivo), usarla directamente
+        uploadedUrl = localUri;
+        uploadedName = displayName || null;
+      }
+
+      // Actualizar la venta en BD local
+      await updateSaleTransferReceipt(detail.sale.id, uploadedUrl, uploadedName);
       const updated = await getSaleWithItems(detail.sale.id);
       setDetail(updated);
       setSales(prev =>
         prev.map(s =>
-          s.id === detail.sale.id ? { ...s, transfer_receipt_uri: saved, transfer_receipt_name: named } : s
+          s.id === detail.sale.id ? { ...s, transfer_receipt_uri: uploadedUrl, transfer_receipt_name: uploadedName } : s
         )
       );
-      Alert.alert('Comprobante', 'Archivo guardado correctamente.');
+      Alert.alert('Comprobante', 'Archivo guardado y sincronizado correctamente.');
     } catch (error) {
-      console.error('persistProof error', error);
-      Alert.alert('Error', 'No se pudo guardar el comprobante.');
+      console.error('❌ persistProof error', error);
+      Alert.alert('Error', `No se pudo guardar el comprobante: ${error.message}`);
     } finally {
       setAttachLoading(false);
     }
