@@ -72,9 +72,18 @@ export async function pushSales() {
       logManager.info(`   Comprobante Nombre: ${s.transfer_receipt_name || '❌ No'}`);
       logManager.info(`   Items: ${s.items_json ? Object.keys(JSON.parse(s.items_json || '{}')).length : 0}`);
       
-      const itemsJson = typeof s.items_json === 'string' 
-        ? s.items_json 
-        : JSON.stringify(s.items_json || {});
+      // Parsear items_json para convertirlo a objeto (no string)
+      let itemsArray = [];
+      try {
+        if (s.items_json) {
+          itemsArray = typeof s.items_json === 'string' 
+            ? JSON.parse(s.items_json)
+            : s.items_json;
+        }
+      } catch (parseError) {
+        logManager.warn(`⚠️ Error parseando items_json: ${parseError.message}`);
+        itemsArray = [];
+      }
       
       const payload = {
         p_total: s.total,
@@ -86,7 +95,7 @@ export async function pushSales() {
         p_notes: s.notes || '',
         p_device_id: deviceId,
         p_client_sale_id: s.client_sale_id,
-        p_items: itemsJson,
+        p_items: itemsArray,  // 🔧 Enviar como objeto/array, no como string
         p_timestamp: originalTimestamp,  // 🔧 Enviar timestamp original
         p_seller_name: sellerName,  // 🆕 Agregar nombre del vendedor
         p_transfer_receipt_uri: s.transfer_receipt_uri || null,  // 🆕 URL pública de comprobante
