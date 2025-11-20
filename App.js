@@ -16,6 +16,7 @@ import QuickScanScreen from './src/screens/QuickScanScreen';
 import LoginScreen from './src/screens/LoginScreen';
 import CashManagementScreen from './src/screens/CashManagementScreen';
 import SettingsScreen from './src/screens/SettingsScreen';
+import LogViewerScreen from './src/screens/LogViewerScreen';
 import { exportCSVFile, exportJSONFile } from './src/export';
 
 import Header from './src/ui/Header';
@@ -28,6 +29,9 @@ import { syncNow, initRealtimeSync } from './src/sync';
 
 // Auth
 import AuthManager from './src/auth/AuthManager';
+
+// Logger
+import { logManager } from './src/utils/LogViewer';
 
 // Separamos la función App para garantizar el orden correcto de los hooks
 export default function App() {
@@ -52,6 +56,7 @@ export default function App() {
   const [openCashHistory, setOpenCashHistory] = useState(false);
   const [openQuickScan, setOpenQuickScan] = useState(false);
   const [openCash, setOpenCash] = useState(false);
+  const [openLogs, setOpenLogs] = useState(false);
   const [isSyncLoading, setIsSyncLoading] = useState(false);
   const [lastSyncTime, setLastSyncTime] = useState(Date.now());
   const [saleRequestedBarcode, setSaleRequestedBarcode] = useState(null);
@@ -66,13 +71,19 @@ export default function App() {
   useEffect(() => {
     const checkAuth = async () => {
       try {
+        // Cargar logs guardados
+        await logManager.loadLogs();
+        logManager.info('📱 App iniciada');
+        
         const user = await AuthManager.getCurrentUser();
         if (user) {
           setCurrentUser(user);
           setIsLoggedIn(true);
+          logManager.info(`✅ Usuario autenticado: ${user.name}`);
         }
       } catch (error) {
         console.error('Error verificando autenticación:', error);
+        logManager.error('❌ Error en autenticación', { message: error.message });
       } finally {
         setIsCheckingAuth(false);
       }
@@ -533,7 +544,25 @@ export default function App() {
         </View>
       )}
 
+      {/* 🐛 Botón debug para ver logs - solo presiona largo en el título */}
+      <TouchableOpacity 
+        style={{ position: 'absolute', top: 10, right: 10, zIndex: 999 }}
+        onLongPress={() => setOpenLogs(true)}
+      >
+        <Text style={{ fontSize: 12, color: '#999' }}>🐛</Text>
+      </TouchableOpacity>
+
       {/* Modales */}
+      <Modal visible={openLogs} animationType="slide" onRequestClose={() => setOpenLogs(false)}>
+        <LogViewerScreen />
+        <TouchableOpacity 
+          style={{ position: 'absolute', top: 20, right: 20, zIndex: 1000, padding: 10 }}
+          onPress={() => setOpenLogs(false)}
+        >
+          <Text style={{ fontSize: 24 }}>✕</Text>
+        </TouchableOpacity>
+      </Modal>
+
       <Modal visible={openForm} animationType="slide" onRequestClose={() => { setOpenForm(false); setSaleRequestedBarcode(null); }}>
         <SafeAreaView style={{ flex: 1, backgroundColor: '#fff' }}>
           <Header title="Producto" subtitle={editing ? 'Editar' : 'Crear nuevo'} compact />
