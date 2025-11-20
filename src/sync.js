@@ -174,6 +174,8 @@ export async function pullSales({ sinceTs } = {}) {
           discount: s.discount || 0,
           tax: s.tax || 0,
           notes: s.notes || '',
+          transfer_receipt_uri: s.transfer_receipt_uri || null,  // 🆕 Sincronizar comprobantes desde otros dispositivos
+          transfer_receipt_name: s.transfer_receipt_name || null, // 🆕 Sincronizar nombre del comprobante
           items,
         });
       } catch (e) {
