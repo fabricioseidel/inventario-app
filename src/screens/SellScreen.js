@@ -160,63 +160,99 @@ export default function SellScreen({
 
   const attachProofFromCamera = useCallback(async () => {
     try {
+      console.log('📷 Iniciando captura desde cámara...');
       const perm = await ImagePicker.requestCameraPermissionsAsync();
+      console.log('📷 Permisos de cámara:', perm.granted ? 'CONCEDIDOS' : 'DENEGADOS');
       if (!perm.granted) {
         Alert.alert('Permiso requerido', 'Activa el acceso a la cámara para tomar una foto del comprobante.');
         return;
       }
+      console.log('📷 Abriendo cámara...');
       const result = await ImagePicker.launchCameraAsync({ quality: 0.7, allowsEditing: true });
+      console.log('📷 Resultado:', result.canceled ? 'CANCELADO' : 'CAPTURADO');
       if (result.canceled) return;
       const asset = result.assets?.[0];
-      if (!asset?.uri) return;
+      console.log('📷 Asset URI:', asset?.uri);
+      if (!asset?.uri) {
+        Alert.alert('Error', 'No se pudo obtener la imagen de la cámara.');
+        return;
+      }
+      console.log('📷 Copiando archivo a documentos...');
       const saved = await copyFileToDocuments(asset.uri, {
         folder: 'receipts',
         prefix: 'transfer',
         extension: 'jpg',
       });
+      console.log('📷 Archivo guardado en:', saved);
       setTransferProof({ uri: saved, name: asset.fileName || getFileDisplayName(saved), kind: 'image' });
+      Alert.alert('Éxito', 'Comprobante adjuntado correctamente.');
     } catch (e) {
-      console.warn('attachProofFromCamera error', e);
-      Alert.alert('Error', 'No se pudo capturar la imagen.');
+      console.error('❌ attachProofFromCamera ERROR:', e);
+      console.error('❌ Error message:', e.message);
+      console.error('❌ Error stack:', e.stack);
+      Alert.alert('Error', `No se pudo capturar la imagen.\n\nDetalle: ${e.message || 'Error desconocido'}`);
     }
   }, []);
 
   const attachProofFromLibrary = useCallback(async () => {
     try {
+      console.log('🖼️ Iniciando selección desde galería...');
       const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      console.log('🖼️ Permisos de galería:', perm.granted ? 'CONCEDIDOS' : 'DENEGADOS');
       if (!perm.granted) {
         Alert.alert('Permiso requerido', 'Activa el acceso a la galería para seleccionar una imagen.');
         return;
       }
+      console.log('🖼️ Abriendo galería...');
       const result = await ImagePicker.launchImageLibraryAsync({ quality: 0.8, allowsEditing: true, mediaTypes: ImagePicker.MediaTypeOptions.Images });
+      console.log('🖼️ Resultado:', result.canceled ? 'CANCELADO' : 'SELECCIONADO');
       if (result.canceled) return;
       const asset = result.assets?.[0];
-      if (!asset?.uri) return;
+      console.log('🖼️ Asset URI:', asset?.uri);
+      if (!asset?.uri) {
+        Alert.alert('Error', 'No se pudo obtener la imagen seleccionada.');
+        return;
+      }
+      console.log('🖼️ Copiando archivo a documentos...');
       const saved = await copyFileToDocuments(asset.uri, {
         folder: 'receipts',
         prefix: 'transfer',
         extension: 'jpg',
       });
+      console.log('🖼️ Archivo guardado en:', saved);
       setTransferProof({ uri: saved, name: asset.fileName || getFileDisplayName(saved), kind: 'image' });
+      Alert.alert('Éxito', 'Comprobante adjuntado correctamente.');
     } catch (e) {
-      console.warn('attachProofFromLibrary error', e);
-      Alert.alert('Error', 'No se pudo adjuntar desde la galería.');
+      console.error('❌ attachProofFromLibrary ERROR:', e);
+      console.error('❌ Error message:', e.message);
+      console.error('❌ Error stack:', e.stack);
+      Alert.alert('Error', `No se pudo adjuntar desde la galería.\n\nDetalle: ${e.message || 'Error desconocido'}`);
     }
   }, []);
 
   const attachProofFromFile = useCallback(async () => {
     try {
+      console.log('📁 Iniciando selección de archivo...');
       const result = await DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true });
+      console.log('📁 Resultado:', result.type === 'cancel' ? 'CANCELADO' : 'SELECCIONADO');
+      console.log('📁 Document result:', result);
       if (result.type === 'cancel') return;
+      console.log('📁 URI del archivo:', result.uri);
+      console.log('📁 Copiando archivo a documentos...');
       const saved = await copyFileToDocuments(result.uri, {
         folder: 'receipts',
         prefix: 'transfer',
       });
+      console.log('📁 Archivo guardado en:', saved);
       const isImage = String(result.mimeType || '').startsWith('image/');
+      console.log('📁 Es imagen?:', isImage);
       setTransferProof({ uri: saved, name: result.name || getFileDisplayName(saved), kind: isImage ? 'image' : 'file' });
+      Alert.alert('Éxito', 'Comprobante adjuntado correctamente.');
     } catch (e) {
-      console.warn('attachProofFromFile error', e);
-      Alert.alert('Error', 'No se pudo adjuntar el archivo.');
+      console.error('❌ attachProofFromFile ERROR:', e);
+      console.error('❌ Error message:', e.message);
+      console.error('❌ Error stack:', e.stack);
+      Alert.alert('Error', `No se pudo adjuntar el archivo.\n\nDetalle: ${e.message || 'Error desconocido'}`);
     }
   }, []);
 
