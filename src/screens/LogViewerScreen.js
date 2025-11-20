@@ -9,11 +9,12 @@ import {
   StyleSheet,
   Share,
   SafeAreaView,
+  useWindowDimensions,
 } from 'react-native';
 import { logManager } from '../utils/LogViewer';
 import { COLORS } from '../ui/Theme';
 
-export default function LogViewerScreen() {
+export default function LogViewerScreen({ onClose }) {
   const [logs, setLogs] = useState([]);
   const [filterLevel, setFilterLevel] = useState('ALL');
   const [autoScroll, setAutoScroll] = useState(true);
@@ -84,8 +85,15 @@ export default function LogViewerScreen() {
     <SafeAreaView style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.title}>📋 Logs de la App</Text>
-        <Text style={styles.subtitle}>{filteredLogs.length} logs</Text>
+        <View>
+          <Text style={styles.title}>📋 Logs de la App</Text>
+          <Text style={styles.subtitle}>{filteredLogs.length} logs</Text>
+        </View>
+        {onClose && (
+          <TouchableOpacity onPress={onClose} style={styles.closeButton}>
+            <Text style={styles.closeButtonText}>✕</Text>
+          </TouchableOpacity>
+        )}
       </View>
 
       {/* Filtros */}
@@ -176,6 +184,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: 15,
     borderBottomWidth: 1,
     borderBottomColor: '#ddd',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+  },
+  closeButton: {
+    padding: 5,
+    marginTop: -5,
+  },
+  closeButtonText: {
+    fontSize: 24,
+    color: 'white',
+    fontWeight: 'bold',
   },
   title: {
     fontSize: 18,

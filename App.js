@@ -554,13 +554,7 @@ export default function App() {
 
       {/* Modales */}
       <Modal visible={openLogs} animationType="slide" onRequestClose={() => setOpenLogs(false)}>
-        <LogViewerScreen />
-        <TouchableOpacity 
-          style={{ position: 'absolute', top: 20, right: 20, zIndex: 1000, padding: 10 }}
-          onPress={() => setOpenLogs(false)}
-        >
-          <Text style={{ fontSize: 24 }}>✕</Text>
-        </TouchableOpacity>
+        <LogViewerScreen onClose={() => setOpenLogs(false)} />
       </Modal>
 
       <Modal visible={openForm} animationType="slide" onRequestClose={() => { setOpenForm(false); setSaleRequestedBarcode(null); }}>
