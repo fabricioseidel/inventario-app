@@ -38,7 +38,7 @@ export async function uploadReceiptToSupabase(localUri, saleId) {
         console.log('📤 Sale ID:', saleId);
 
         // Leer el archivo como base64
-        const base64 = await FileSystem.readAsStringAsync(localUri, {
+        const base64Data = await FileSystem.readAsStringAsync(localUri, {
             encoding: FileSystem.EncodingType.Base64,
         });
 
@@ -54,14 +54,15 @@ export async function uploadReceiptToSupabase(localUri, saleId) {
         console.log('📤 Nombre del archivo:', fileName);
         console.log('📤 Content-Type:', contentType);
 
-        // Convertir base64 a ArrayBuffer
-        const binaryString = atob(base64);
-        const bytes = new Uint8Array(binaryString.length);
-        for (let i = 0; i < binaryString.length; i++) {
+        // Convertir base64 a Uint8Array
+        const binaryString = Buffer.from(base64Data, 'base64').toString('binary');
+        const len = binaryString.length;
+        const bytes = new Uint8Array(len);
+        for (let i = 0; i < len; i++) {
             bytes[i] = binaryString.charCodeAt(i);
         }
 
-        // Subir a Supabase Storage
+        // Subir a Supabase Storage como ArrayBuffer
         const { data, error } = await supabase.storage
             .from('uploads')
             .upload(fileName, bytes.buffer, {
