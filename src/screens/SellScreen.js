@@ -285,27 +285,55 @@ export default function SellScreen({
       // Si hay comprobante de imagen, subirlo a Supabase Storage
       if (proof && proof.kind === 'image') {
         try {
-          console.log('📤 Iniciando carga de comprobante a Supabase...');
+          console.log('═══════════════════════════════════════════════════════');
+          console.log('📤 [VENTA] Iniciando proceso de pago con comprobante');
+          console.log('═══════════════════════════════════════════════════════');
+          console.log(`Método de pago: TRANSFERENCIA`);
+          console.log(`Total venta: $${total.toFixed(0)}`);
+          console.log(`Comprobante detectado: Sí`);
+          console.log(`Tipo: ${proof.kind}`);
+          console.log(`Nombre: ${proof.name}`);
+          
           // Generar un ID temporal para el nombre del archivo
           const tempSaleId = `temp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+          console.log(`⏳ [PASO 1] Subiendo comprobante a Supabase...`);
+          console.log(`   ID temporal: ${tempSaleId}`);
+          
           receiptUrl = await uploadReceiptToSupabase(proof.uri, tempSaleId);
           receiptName = proof.name;
-          console.log('✅ Comprobante subido exitosamente');
-          console.log('✅ URL pública:', receiptUrl);
+          
+          console.log(`✅ [PASO 2] Comprobante subido exitosamente`);
+          console.log(`   URL: ${receiptUrl}`);
+          console.log(`═══════════════════════════════════════════════════════`);
         } catch (uploadError) {
-          console.error('❌ Error subiendo comprobante:', uploadError);
-          Alert.alert('Error', `No se pudo subir el comprobante: ${uploadError.message}\n\nLa venta se registrará sin comprobante.`);
+          console.error('═══════════════════════════════════════════════════════');
+          console.error(`❌ [ERROR] Fallo al subir comprobante`);
+          console.error('═══════════════════════════════════════════════════════');
+          console.error(`Error: ${uploadError.message}`);
+          console.error(`Stack: ${uploadError.stack}`);
+          console.error(`Sale ID temporal: temp-${Date.now()}`);
+          Alert.alert('Error en Comprobante', `No se pudo subir el comprobante: ${uploadError.message}\n\nLa venta se registrará sin comprobante.`);
           // Continuamos sin comprobante
         }
       }
 
+      console.log('⏳ [PASO 3] Registrando venta en base de datos local...');
       const payload = {
         paymentMethod: method,
         amountPaid: Number(amountPaid || 0),
         transferReceiptUri: receiptUrl,
         transferReceiptName: receiptName,
       };
+      console.log(`Payload:`, {
+        method,
+        amountPaid: payload.amountPaid,
+        hasReceipt: !!receiptUrl,
+        receiptUrl: receiptUrl ? '✅ Presente' : '❌ Ausente',
+      });
+      
       await recordSale(cart, payload);
+      console.log(`✅ Venta registrada en local correctamente`);
+      
       Alert.alert(
         'Venta registrada',
         `Total: $${total.toFixed(0)}${method === 'efectivo' ? `\nVuelto: $${change.toFixed(0)}` : ''}`
@@ -313,8 +341,15 @@ export default function SellScreen({
       clear();
       onSold && onSold();
     } catch (e) {
-      console.warn('pay error', e);
-      Alert.alert('Error', 'No se pudo registrar la venta.');
+      console.error('═══════════════════════════════════════════════════════');
+      console.error('❌ [ERROR CRÍTICO] Error al procesar el pago');
+      console.error('═══════════════════════════════════════════════════════');
+      console.error(`Error Type: ${e.name}`);
+      console.error(`Error Message: ${e.message}`);
+      console.error(`Stack: ${e.stack}`);
+      console.error(`Monto: $${total.toFixed(0)}`);
+      console.error(`Método: ${method}`);
+      Alert.alert('Error', `No se pudo registrar la venta: ${e.message}`);
     }
   }, [amountPaid, canPay, cart, change, clear, method, onSold, total, transferProof]);
 

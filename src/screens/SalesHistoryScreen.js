@@ -107,29 +107,50 @@ export default function SalesHistoryScreen({ onClose, refreshKey }) {
   };
 
   const persistProof = async (localUri, displayName) => {
-    if (!detail?.sale?.id || !localUri) return;
+    const startTime = Date.now();
+    if (!detail?.sale?.id || !localUri) {
+      console.warn('⚠️ persistProof: Falta sale.id o localUri');
+      return;
+    }
+    
     setAttachLoading(true);
     try {
-      console.log('📤 Subiendo comprobante a Supabase desde historial...');
+      console.log('═══════════════════════════════════════════════════════');
+      console.log('📎 [ADJUNTAR COMPROBANTE] Procesando archivo');
+      console.log('═══════════════════════════════════════════════════════');
+      console.log(`⏰ Timestamp: ${new Date().toISOString()}`);
+      console.log(`🆔 Sale ID: ${detail.sale.id}`);
+      console.log(`📁 URI: ${localUri.substring(0, 80)}...`);
+      console.log(`📝 Nombre: ${displayName}`);
       
       // Subir a Supabase Storage en lugar de guardar localmente
       let uploadedUrl = null;
       let uploadedName = null;
+      let isLocalFile = false;
 
       // Si es una imagen, subirla a Supabase
       if (localUri.startsWith('file://') || localUri.includes('Documents')) {
+        isLocalFile = true;
+        console.log('⏳ [PASO 1] Detectado archivo local - procediendo con upload');
         uploadedUrl = await uploadReceiptToSupabase(localUri, detail.sale.id);
         uploadedName = displayName || getFileDisplayName(localUri) || null;
-        console.log('✅ Comprobante subido exitosamente');
-        console.log('✅ URL: ', uploadedUrl);
+        console.log(`✅ [PASO 2] Archivo subido a Supabase`);
+        console.log(`   URL: ${uploadedUrl}`);
       } else {
         // Si ya es una URL (de otro dispositivo), usarla directamente
+        isLocalFile = false;
+        console.log('✅ [PASO 1] Detectada URL remota - usando directamente');
         uploadedUrl = localUri;
         uploadedName = displayName || null;
+        console.log(`   URL: ${uploadedUrl.substring(0, 60)}...`);
       }
 
       // Actualizar la venta en BD local
+      console.log('⏳ [PASO 3] Actualizando venta en base de datos local...');
       await updateSaleTransferReceipt(detail.sale.id, uploadedUrl, uploadedName);
+      console.log(`✅ BD local actualizada`);
+
+      console.log('⏳ [PASO 4] Recargando detalle de venta...');
       const updated = await getSaleWithItems(detail.sale.id);
       setDetail(updated);
       setSales(prev =>
@@ -137,9 +158,27 @@ export default function SalesHistoryScreen({ onClose, refreshKey }) {
           s.id === detail.sale.id ? { ...s, transfer_receipt_uri: uploadedUrl, transfer_receipt_name: uploadedName } : s
         )
       );
+      console.log(`✅ Venta actualizada en lista`);
+
+      const totalTime = Date.now() - startTime;
+      console.log('═══════════════════════════════════════════════════════');
+      console.log(`✅ [ÉXITO] Comprobante procesado en ${totalTime}ms`);
+      console.log('═══════════════════════════════════════════════════════');
+      console.log(`Tipo: ${isLocalFile ? 'Archivo nuevo' : 'URL remota'}`);
+      console.log(`URL Final: ${uploadedUrl.substring(0, 60)}...`);
+      
       Alert.alert('Comprobante', 'Archivo guardado y sincronizado correctamente.');
     } catch (error) {
-      console.error('❌ persistProof error', error);
+      const totalTime = Date.now() - startTime;
+      console.error('═══════════════════════════════════════════════════════');
+      console.error(`❌ [ERROR] Falló al procesar comprobante (${totalTime}ms)`);
+      console.error('═══════════════════════════════════════════════════════');
+      console.error(`Error Type: ${error.name}`);
+      console.error(`Error Message: ${error.message}`);
+      console.error(`Stack: ${error.stack}`);
+      console.error(`Sale ID: ${detail?.sale?.id}`);
+      console.error(`URI: ${localUri?.substring(0, 60)}...`);
+      
       Alert.alert('Error', `No se pudo guardar el comprobante: ${error.message}`);
     } finally {
       setAttachLoading(false);

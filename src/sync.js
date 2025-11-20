@@ -30,6 +30,7 @@ async function getDeviceId() {
 
 // ---------- VENTAS ----------
 export async function pushSales() {
+  const pushStartTime = Date.now();
   const pending = await getUnsyncedSales();
   const deviceId = await getDeviceId();
   
@@ -37,7 +38,21 @@ export async function pushSales() {
   const currentUser = await AuthManager.getCurrentUser();
   const sellerName = currentUser?.name || null;
   
-  console.log(`📤 Subiendo ${pending.length} ventas pendientes desde dispositivo: ${deviceId}, vendedor: ${sellerName || 'desconocido'}`);
+  console.log('═══════════════════════════════════════════════════════');
+  console.log(`📤 [SYNC UPLOAD] Sincronizando ventas con Supabase`);
+  console.log('═══════════════════════════════════════════════════════');
+  console.log(`⏰ Timestamp: ${new Date().toISOString()}`);
+  console.log(`📱 Device ID: ${deviceId}`);
+  console.log(`👤 Vendedor: ${sellerName || 'desconocido'}`);
+  console.log(`📊 Ventas pendientes: ${pending.length}`);
+  
+  if (pending.length === 0) {
+    console.log('✅ No hay ventas pendientes');
+    return;
+  }
+  
+  let successCount = 0;
+  let errorCount = 0;
   
   for (const s of pending) {
     // 🔧 FIX: Usar el timestamp original de la venta, no el momento del sync
@@ -46,6 +61,13 @@ export async function pushSales() {
       // Convertir timestamp local a ISO string para enviar a Supabase
       originalTimestamp = new Date(s.ts).toISOString();
     }
+    
+    console.log('───────────────────────────────────────────────────────');
+    console.log(`📋 Venta: ${s.client_sale_id}`);
+    console.log(`   Total: $${s.total}`);
+    console.log(`   Método: ${s.payment_method}`);
+    console.log(`   Comprobante: ${s.transfer_receipt_uri ? '✅ Sí' : '❌ No'}`);
+    console.log(`   Items: ${s.items_json ? Object.keys(JSON.parse(s.items_json || '{}')).length : 0}`);
     
     const payload = {
       p_total: s.total,
@@ -64,17 +86,37 @@ export async function pushSales() {
       p_transfer_receipt_name: s.transfer_receipt_name || null  // 🆕 Nombre del comprobante
     };
     
-    console.log(`📤 Subiendo venta: ${s.client_sale_id}, total: ${s.total}, vendedor: ${sellerName}, timestamp: ${originalTimestamp || 'auto'}`);
+    console.log(`⏳ Enviando RPC 'apply_sale'...`);
+    const rpcStartTime = Date.now();
     
     const { data, error } = await supabase.rpc('apply_sale', payload);
-    if (error) {
-      console.warn('Error subiendo venta:', error, 'Payload:', payload);
-      continue;
-    }
     
-    console.log(`✅ Venta sincronizada: ${s.client_sale_id} -> ${data}`);
-    await markSaleSynced(s.local_sale_id, data);
+    const rpcDuration = Date.now() - rpcStartTime;
+    
+    if (error) {
+      errorCount++;
+      console.error(`❌ [ERROR RPC] Fallo después de ${rpcDuration}ms`);
+      console.error(`   Código: ${error.statusCode || 'N/A'}`);
+      console.error(`   Mensaje: ${error.message}`);
+      console.error(`   Venta: ${s.client_sale_id}`);
+      console.error(`   Payload: ${JSON.stringify(payload)}`);
+    } else {
+      successCount++;
+      console.log(`✅ [RPC OK] Completado en ${rpcDuration}ms`);
+      console.log(`   ID en Supabase: ${data}`);
+      await markSaleSynced(s.local_sale_id, data);
+    }
   }
+  
+  const pushEndTime = Date.now();
+  const totalTime = pushEndTime - pushStartTime;
+  
+  console.log('═══════════════════════════════════════════════════════');
+  console.log(`✅ [SYNC UPLOAD COMPLETADO] ${totalTime}ms`);
+  console.log('═══════════════════════════════════════════════════════');
+  console.log(`✅ Exitosas: ${successCount}`);
+  console.log(`❌ Errores: ${errorCount}`);
+  console.log(`📊 Total: ${pending.length}`);
 }
 
 // ---------- PRODUCTOS ----------
@@ -131,11 +173,20 @@ export async function pullProducts({ sinceTs } = {}) {
 }
 
 export async function pullSales({ sinceTs } = {}) {
+  const pullStartTime = Date.now();
   const sinceIso = sinceTs ? new Date(sinceTs).toISOString() : '1970-01-01T00:00:00Z';
   const deviceId = await getDeviceId();
   
-  console.log(`📥 Descargando ventas desde: ${sinceIso}, dispositivo actual: ${deviceId}`);
+  console.log('═══════════════════════════════════════════════════════');
+  console.log(`📥 [SYNC DOWNLOAD] Descargando ventas desde Supabase`);
+  console.log('═══════════════════════════════════════════════════════');
+  console.log(`⏰ Timestamp: ${new Date().toISOString()}`);
+  console.log(`📱 Device ID: ${deviceId}`);
+  console.log(`🕐 Desde: ${sinceIso}`);
 
+  console.log(`⏳ [PASO 1] Consultando tabla 'sales'...`);
+  const queryStartTime = Date.now();
+  
   const { data: sales, error } = await supabase
     .from('sales')
     .select('*')
@@ -144,27 +195,57 @@ export async function pullSales({ sinceTs } = {}) {
     .order('ts', { ascending: true })  // 🔧 Ordenar por ts
     .limit(1000);
     
+  const queryDuration = Date.now() - queryStartTime;
+  
   if (error) {
-    console.error('Error descargando ventas:', error);
+    console.error('═══════════════════════════════════════════════════════');
+    console.error(`❌ [ERROR QUERY] Fallo después de ${queryDuration}ms`);
+    console.error('═══════════════════════════════════════════════════════');
+    console.error(`Error: ${error.message}`);
+    console.error(`Código: ${error.statusCode || 'N/A'}`);
     throw error;
   }
   
-  console.log(`📥 Encontradas ${sales?.length || 0} ventas para sincronizar`);
+  console.log(`✅ Query completada en ${queryDuration}ms`);
+  console.log(`📊 Ventas encontradas: ${sales?.length || 0}`);
+  
+  if (!sales?.length) {
+    console.log('✅ No hay ventas nuevas para sincronizar');
+    return;
+  }
+  
+  let successCount = 0;
+  let errorCount = 0;
   
   if (sales?.length) {
     for (const s of sales) {
+      console.log('───────────────────────────────────────────────────────');
+      console.log(`📋 Venta remota: ${s.id}`);
+      console.log(`   Total: $${s.total}`);
+      console.log(`   Método: ${s.payment_method}`);
+      console.log(`   Dispositivo origen: ${s.device_id}`);
+      console.log(`   Timestamp: ${new Date(s.ts).toISOString()}`);
+      console.log(`   Comprobante: ${s.transfer_receipt_uri ? '✅ Sí' : '❌ No'}`);
+      
       let items = s.items || s.items_json || [];
       if (typeof items === 'string') {
-        try { items = JSON.parse(items); } catch (e) {
-          console.warn('Error parseando items de venta:', e);
+        try { 
+          items = JSON.parse(items);
+          console.log(`   Items (JSON): ${Object.keys(items).length}`);
+        } catch (e) {
+          console.warn(`⚠️ Error parseando items:`, e.message);
+          errorCount++;
           continue;
         }
       }
+      
       try {
         // 🔧 Usar directamente el timestamp de la venta
         const tsMillis = s.ts ? new Date(s.ts).getTime() : Date.now();
         
-        console.log(`📥 Insertando venta remota: ${s.id}, total: ${s.total}, timestamp: ${new Date(tsMillis).toLocaleString()}`);
+        console.log(`⏳ Insertando en BD local...`);
+        const insertStartTime = Date.now();
+        
         await insertSaleFromCloud({
           ts: tsMillis,
           total: s.total,
@@ -178,11 +259,29 @@ export async function pullSales({ sinceTs } = {}) {
           transfer_receipt_name: s.transfer_receipt_name || null, // 🆕 Sincronizar nombre del comprobante
           items,
         });
+        
+        const insertDuration = Date.now() - insertStartTime;
+        successCount++;
+        console.log(`✅ Insertada en BD local (${insertDuration}ms)`);
+        
       } catch (e) {
-        console.warn('Error insertando venta desde cloud:', e);
+        errorCount++;
+        console.error(`❌ Error insertando venta:`, e.message);
+        console.error(`   Stack: ${e.stack}`);
+        console.error(`   Sale ID: ${s.id}`);
       }
     }
   }
+  
+  const pullEndTime = Date.now();
+  const totalTime = pullEndTime - pullStartTime;
+  
+  console.log('═══════════════════════════════════════════════════════');
+  console.log(`✅ [SYNC DOWNLOAD COMPLETADO] ${totalTime}ms`);
+  console.log('═══════════════════════════════════════════════════════');
+  console.log(`✅ Insertadas: ${successCount}`);
+  console.log(`❌ Errores: ${errorCount}`);
+  console.log(`📊 Total procesadas: ${sales.length}`);
 }
 
 // ---------- SYNC PRINCIPAL ----------
