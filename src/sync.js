@@ -9,6 +9,7 @@ import {
   insertSaleFromCloud, insertOrUpdateProduct, getLastSaleTs
 } from './db';
 import { AuthManager } from './auth/AuthManager';
+import { logManager } from './utils/LogViewer';
 
 const DEVICE_KEY = 'device_id';
 let DEVICE_ID = null;
@@ -38,16 +39,16 @@ export async function pushSales() {
   const currentUser = await AuthManager.getCurrentUser();
   const sellerName = currentUser?.name || null;
   
-  console.log('═══════════════════════════════════════════════════════');
-  console.log(`📤 [SYNC UPLOAD] Sincronizando ventas con Supabase`);
-  console.log('═══════════════════════════════════════════════════════');
-  console.log(`⏰ Timestamp: ${new Date().toISOString()}`);
-  console.log(`📱 Device ID: ${deviceId}`);
-  console.log(`👤 Vendedor: ${sellerName || 'desconocido'}`);
-  console.log(`📊 Ventas pendientes: ${pending.length}`);
+  logManager.info('═══════════════════════════════════════════════════════');
+  logManager.info(`📤 [SYNC UPLOAD] Sincronizando ventas con Supabase`);
+  logManager.info('═══════════════════════════════════════════════════════');
+  logManager.info(`⏰ Timestamp: ${new Date().toISOString()}`);
+  logManager.info(`📱 Device ID: ${deviceId}`);
+  logManager.info(`👤 Vendedor: ${sellerName || 'desconocido'}`);
+  logManager.info(`📊 Ventas pendientes: ${pending.length}`);
   
   if (pending.length === 0) {
-    console.log('✅ No hay ventas pendientes');
+    logManager.info('✅ No hay ventas pendientes');
     return;
   }
   
@@ -62,13 +63,17 @@ export async function pushSales() {
       originalTimestamp = new Date(s.ts).toISOString();
     }
     
-    console.log('───────────────────────────────────────────────────────');
-    console.log(`📋 Venta: ${s.client_sale_id}`);
-    console.log(`   Total: $${s.total}`);
-    console.log(`   Método: ${s.payment_method}`);
-    console.log(`   Comprobante URI: ${s.transfer_receipt_uri ? '✅ ' + s.transfer_receipt_uri.substring(0, 60) + '...' : '❌ No'}`);
-    console.log(`   Comprobante Nombre: ${s.transfer_receipt_name || '❌ No'}`);
-    console.log(`   Items: ${s.items_json ? Object.keys(JSON.parse(s.items_json || '{}')).length : 0}`);
+    logManager.info('───────────────────────────────────────────────────────');
+    logManager.info(`📋 Venta: ${s.client_sale_id}`);
+    logManager.info(`   Total: $${s.total}`);
+    logManager.info(`   Método: ${s.payment_method}`);
+    logManager.info(`   Comprobante URI: ${s.transfer_receipt_uri ? '✅ ' + s.transfer_receipt_uri.substring(0, 60) + '...' : '❌ No'}`);
+    logManager.info(`   Comprobante Nombre: ${s.transfer_receipt_name || '❌ No'}`);
+    logManager.info(`   Items: ${s.items_json ? Object.keys(JSON.parse(s.items_json || '{}')).length : 0}`);
+    
+    const itemsJson = typeof s.items_json === 'string' 
+      ? s.items_json 
+      : JSON.stringify(s.items_json || {});
     
     const payload = {
       p_total: s.total,
@@ -80,17 +85,17 @@ export async function pushSales() {
       p_notes: s.notes || '',
       p_device_id: deviceId,
       p_client_sale_id: s.client_sale_id,
-      p_items: s.items_json,
+      p_items: itemsJson,
       p_timestamp: originalTimestamp,  // 🔧 Enviar timestamp original
       p_seller_name: sellerName,  // 🆕 Agregar nombre del vendedor
       p_transfer_receipt_uri: s.transfer_receipt_uri || null,  // 🆕 URL pública de comprobante
       p_transfer_receipt_name: s.transfer_receipt_name || null  // 🆕 Nombre del comprobante
     };
     
-    console.log(`⏳ Enviando RPC 'apply_sale'...`);
-    console.log(`   📎 Parámetros de comprobante:`);
-    console.log(`      - URI: ${payload.p_transfer_receipt_uri ? payload.p_transfer_receipt_uri.substring(0, 50) + '...' : 'null'}`);
-    console.log(`      - Nombre: ${payload.p_transfer_receipt_name || 'null'}`);
+    logManager.info(`⏳ Enviando RPC 'apply_sale'...`);
+    logManager.info(`   📎 Parámetros de comprobante:`);
+    logManager.info(`      - URI: ${payload.p_transfer_receipt_uri ? payload.p_transfer_receipt_uri.substring(0, 50) + '...' : 'null'}`);
+    logManager.info(`      - Nombre: ${payload.p_transfer_receipt_name || 'null'}`);
     
     const rpcStartTime = Date.now();
     
@@ -100,18 +105,18 @@ export async function pushSales() {
     
     if (error) {
       errorCount++;
-      console.error(`❌ [ERROR RPC] Fallo después de ${rpcDuration}ms`);
-      console.error(`   Código: ${error.statusCode || 'N/A'}`);
-      console.error(`   Mensaje: ${error.message}`);
-      console.error(`   Venta: ${s.client_sale_id}`);
-      console.error(`   📎 Comprobante URI enviado: ${payload.p_transfer_receipt_uri}`);
-      console.error(`   📎 Comprobante Nombre enviado: ${payload.p_transfer_receipt_name}`);
-      console.error(`   Payload completo:`, payload);
+      logManager.error(`❌ [ERROR RPC] Fallo después de ${rpcDuration}ms`);
+      logManager.error(`   Código: ${error.statusCode || 'N/A'}`);
+      logManager.error(`   Mensaje: ${error.message}`);
+      logManager.error(`   Venta: ${s.client_sale_id}`);
+      logManager.error(`   📎 Comprobante URI enviado: ${payload.p_transfer_receipt_uri}`);
+      logManager.error(`   📎 Comprobante Nombre enviado: ${payload.p_transfer_receipt_name}`);
+      logManager.error(`   Payload completo:`, payload);
     } else {
       successCount++;
-      console.log(`✅ [RPC OK] Completado en ${rpcDuration}ms`);
-      console.log(`   ID en Supabase: ${data}`);
-      console.log(`   📎 Comprobante guardado en Supabase: ${payload.p_transfer_receipt_uri ? 'Sí ✅' : 'No'}`);
+      logManager.info(`✅ [RPC OK] Completado en ${rpcDuration}ms`);
+      logManager.info(`   ID en Supabase: ${data}`);
+      logManager.info(`   📎 Comprobante guardado en Supabase: ${payload.p_transfer_receipt_uri ? 'Sí ✅' : 'No'}`);
       await markSaleSynced(s.local_sale_id, data);
     }
   }
@@ -119,12 +124,12 @@ export async function pushSales() {
   const pushEndTime = Date.now();
   const totalTime = pushEndTime - pushStartTime;
   
-  console.log('═══════════════════════════════════════════════════════');
-  console.log(`✅ [SYNC UPLOAD COMPLETADO] ${totalTime}ms`);
-  console.log('═══════════════════════════════════════════════════════');
-  console.log(`✅ Exitosas: ${successCount}`);
-  console.log(`❌ Errores: ${errorCount}`);
-  console.log(`📊 Total: ${pending.length}`);
+  logManager.info('═══════════════════════════════════════════════════════');
+  logManager.info(`✅ [SYNC UPLOAD COMPLETADO] ${totalTime}ms`);
+  logManager.info('═══════════════════════════════════════════════════════');
+  logManager.info(`✅ Exitosas: ${successCount}`);
+  logManager.info(`❌ Errores: ${errorCount}`);
+  logManager.info(`📊 Total: ${pending.length}`);
 }
 
 // ---------- PRODUCTOS ----------
@@ -146,7 +151,7 @@ export async function pushProducts() {
     { onConflict: 'barcode' }
   );
 
-  if (error) console.warn('push products error', error);
+  if (error) logManager.warn('push products error', error);
 }
 
 export async function pushCategories() {
@@ -158,7 +163,7 @@ export async function pushCategories() {
     { onConflict: 'name' }
   );
 
-  if (error) console.warn('push categories error', error);
+  if (error) logManager.warn('push categories error', error);
 }
 
 // ---------- DESCARGA ----------
@@ -185,14 +190,14 @@ export async function pullSales({ sinceTs } = {}) {
   const sinceIso = sinceTs ? new Date(sinceTs).toISOString() : '1970-01-01T00:00:00Z';
   const deviceId = await getDeviceId();
   
-  console.log('═══════════════════════════════════════════════════════');
-  console.log(`📥 [SYNC DOWNLOAD] Descargando ventas desde Supabase`);
-  console.log('═══════════════════════════════════════════════════════');
-  console.log(`⏰ Timestamp: ${new Date().toISOString()}`);
-  console.log(`📱 Device ID: ${deviceId}`);
-  console.log(`🕐 Desde: ${sinceIso}`);
+  logManager.info('═══════════════════════════════════════════════════════');
+  logManager.info(`📥 [SYNC DOWNLOAD] Descargando ventas desde Supabase`);
+  logManager.info('═══════════════════════════════════════════════════════');
+  logManager.info(`⏰ Timestamp: ${new Date().toISOString()}`);
+  logManager.info(`📱 Device ID: ${deviceId}`);
+  logManager.info(`🕐 Desde: ${sinceIso}`);
 
-  console.log(`⏳ [PASO 1] Consultando tabla 'sales'...`);
+  logManager.info(`⏳ [PASO 1] Consultando tabla 'sales'...`);
   const queryStartTime = Date.now();
   
   const { data: sales, error } = await supabase
@@ -206,19 +211,19 @@ export async function pullSales({ sinceTs } = {}) {
   const queryDuration = Date.now() - queryStartTime;
   
   if (error) {
-    console.error('═══════════════════════════════════════════════════════');
-    console.error(`❌ [ERROR QUERY] Fallo después de ${queryDuration}ms`);
-    console.error('═══════════════════════════════════════════════════════');
-    console.error(`Error: ${error.message}`);
-    console.error(`Código: ${error.statusCode || 'N/A'}`);
+    logManager.error('═══════════════════════════════════════════════════════');
+    logManager.error(`❌ [ERROR QUERY] Fallo después de ${queryDuration}ms`);
+    logManager.error('═══════════════════════════════════════════════════════');
+    logManager.error(`Error: ${error.message}`);
+    logManager.error(`Código: ${error.statusCode || 'N/A'}`);
     throw error;
   }
   
-  console.log(`✅ Query completada en ${queryDuration}ms`);
-  console.log(`📊 Ventas encontradas: ${sales?.length || 0}`);
+  logManager.info(`✅ Query completada en ${queryDuration}ms`);
+  logManager.info(`📊 Ventas encontradas: ${sales?.length || 0}`);
   
   if (!sales?.length) {
-    console.log('✅ No hay ventas nuevas para sincronizar');
+    logManager.info('✅ No hay ventas nuevas para sincronizar');
     return;
   }
   
@@ -227,21 +232,21 @@ export async function pullSales({ sinceTs } = {}) {
   
   if (sales?.length) {
     for (const s of sales) {
-      console.log('───────────────────────────────────────────────────────');
-      console.log(`📋 Venta remota: ${s.id}`);
-      console.log(`   Total: $${s.total}`);
-      console.log(`   Método: ${s.payment_method}`);
-      console.log(`   Dispositivo origen: ${s.device_id}`);
-      console.log(`   Timestamp: ${new Date(s.ts).toISOString()}`);
-      console.log(`   Comprobante: ${s.transfer_receipt_uri ? '✅ Sí' : '❌ No'}`);
+      logManager.info('───────────────────────────────────────────────────────');
+      logManager.info(`📋 Venta remota: ${s.id}`);
+      logManager.info(`   Total: $${s.total}`);
+      logManager.info(`   Método: ${s.payment_method}`);
+      logManager.info(`   Dispositivo origen: ${s.device_id}`);
+      logManager.info(`   Timestamp: ${new Date(s.ts).toISOString()}`);
+      logManager.info(`   Comprobante: ${s.transfer_receipt_uri ? '✅ Sí' : '❌ No'}`);
       
       let items = s.items || s.items_json || [];
       if (typeof items === 'string') {
         try { 
           items = JSON.parse(items);
-          console.log(`   Items (JSON): ${Object.keys(items).length}`);
+          logManager.info(`   Items (JSON): ${Object.keys(items).length}`);
         } catch (e) {
-          console.warn(`⚠️ Error parseando items:`, e.message);
+          logManager.warn(`⚠️ Error parseando items:`, e.message);
           errorCount++;
           continue;
         }
@@ -251,7 +256,7 @@ export async function pullSales({ sinceTs } = {}) {
         // 🔧 Usar directamente el timestamp de la venta
         const tsMillis = s.ts ? new Date(s.ts).getTime() : Date.now();
         
-        console.log(`⏳ Insertando en BD local...`);
+        logManager.info(`⏳ Insertando en BD local...`);
         const insertStartTime = Date.now();
         
         await insertSaleFromCloud({
@@ -270,13 +275,13 @@ export async function pullSales({ sinceTs } = {}) {
         
         const insertDuration = Date.now() - insertStartTime;
         successCount++;
-        console.log(`✅ Insertada en BD local (${insertDuration}ms)`);
+        logManager.info(`✅ Insertada en BD local (${insertDuration}ms)`);
         
       } catch (e) {
         errorCount++;
-        console.error(`❌ Error insertando venta:`, e.message);
-        console.error(`   Stack: ${e.stack}`);
-        console.error(`   Sale ID: ${s.id}`);
+        logManager.error(`❌ Error insertando venta:`, e.message);
+        logManager.error(`   Stack: ${e.stack}`);
+        logManager.error(`   Sale ID: ${s.id}`);
       }
     }
   }
@@ -284,69 +289,71 @@ export async function pullSales({ sinceTs } = {}) {
   const pullEndTime = Date.now();
   const totalTime = pullEndTime - pullStartTime;
   
-  console.log('═══════════════════════════════════════════════════════');
-  console.log(`✅ [SYNC DOWNLOAD COMPLETADO] ${totalTime}ms`);
-  console.log('═══════════════════════════════════════════════════════');
-  console.log(`✅ Insertadas: ${successCount}`);
-  console.log(`❌ Errores: ${errorCount}`);
-  console.log(`📊 Total procesadas: ${sales.length}`);
+  logManager.info('═══════════════════════════════════════════════════════');
+  logManager.info(`✅ [SYNC DOWNLOAD COMPLETADO] ${totalTime}ms`);
+  logManager.info('═══════════════════════════════════════════════════════');
+  logManager.info(`✅ Insertadas: ${successCount}`);
+  logManager.info(`❌ Errores: ${errorCount}`);
+  logManager.info(`📊 Total procesadas: ${sales.length}`);
 }
 
 // ---------- SYNC PRINCIPAL ----------
 export async function syncNow() {
-  console.log('🔄 Iniciando sincronización...');
+  logManager.info('🔄 Iniciando sincronización...');
   
   try {
     // 1) Subir primero todo lo local
     
     // 🔧 COMENTADO TEMPORALMENTE: No subir productos masivamente al inicio
     // Solo sincronizar cuando sea necesario (agregar/editar producto individual)
-    // console.log('📤 Subiendo productos...');
+    // logManager.info('📤 Subiendo productos...');
     // try {
     //   await pushProducts();
     // } catch (e) {
-    //   console.warn('⚠️ Error subiendo productos:', e);
+    //   logManager.warn('⚠️ Error subiendo productos:', e);
     // }
     
-    // console.log('📤 Subiendo categorías...');
+    // logManager.info('📤 Subiendo categorías...');
     // try {
     //   await pushCategories();
     // } catch (e) {
-    //   console.warn('⚠️ Error subiendo categorías:', e);
+    //   logManager.warn('⚠️ Error subiendo categorías:', e);
     // }
     
-    console.log('📤 Subiendo ventas...');
+    logManager.info('📤 Subiendo ventas...');
     try {
       await pushSales();
     } catch (e) {
-      console.warn('⚠️ Error subiendo ventas:', e);
+      logManager.warn('⚠️ Error subiendo ventas:', e);
       // Continuamos con el proceso
     }
 
     // 2) Luego bajar lo más reciente
-    console.log('📥 Descargando productos...');
+    logManager.info('📥 Descargando productos...');
     try {
       const lastProductTs = await listLocalProductsUpdatedAfter();
       await pullProducts({ sinceTs: lastProductTs });
     } catch (e) {
-      console.warn('⚠️ Error descargando productos:', e);
+      logManager.warn('⚠️ Error descargando productos:', e);
     }
     
-    console.log('📥 Descargando ventas...');
+    logManager.info('📥 Descargando ventas...');
     try {
       const lastSaleTs = await getLastSaleTs();
       await pullSales({ sinceTs: lastSaleTs });
     } catch (e) {
-      console.warn('⚠️ Error descargando ventas:', e);
+      logManager.warn('⚠️ Error descargando ventas:', e);
     }
     
-    console.log('✅ Sincronización completada exitosamente');
+    logManager.info('✅ Sincronización completada exitosamente');
     return true;
   } catch (error) {
-    console.error('❌ Error en sincronización:', error);
+    logManager.error('❌ Error en sincronización:', error);
     throw error;
   }
 }
+
+
 
 // ---------- REALTIME ----------
 let realtimeStarted = false;
@@ -373,7 +380,7 @@ export async function initRealtimeSync() {
             stock: p.stock,
           });
         } catch (e) {
-          console.warn('realtime product error', e);
+          logManager.warn('realtime product error', e);
         }
       }
     )
@@ -384,10 +391,10 @@ export async function initRealtimeSync() {
         const s = payload.new || {};
         const deviceId = await getDeviceId();
         
-        console.log(`📡 Venta recibida en tiempo real: id=${s.id}, dispositivo=${s.device_id}, dispositivo_actual=${deviceId}`);
+        logManager.info(`📡 Venta recibida en tiempo real: id=${s.id}, dispositivo=${s.device_id}, dispositivo_actual=${deviceId}`);
         
         if (s.device_id === deviceId) {
-          console.log(`⏭️ Venta es del dispositivo actual, saltando`);
+          logManager.info(`⏭️ Venta es del dispositivo actual, saltando`);
           return;
         }
         
@@ -395,9 +402,9 @@ export async function initRealtimeSync() {
         if (typeof items === 'string') {
           try { 
             items = JSON.parse(items); 
-            console.log(`📡 Items parseados:`, items);
+            logManager.info(`📡 Items parseados:`, items);
           } catch (e) {
-            console.warn(`❌ Error parseando items:`, e);
+            logManager.warn(`❌ Error parseando items:`, e);
             items = [];
           }
         }
@@ -406,7 +413,7 @@ export async function initRealtimeSync() {
           // 🔧 Usar directamente el timestamp de la venta
           const tsMillis = s.ts ? new Date(s.ts).getTime() : Date.now();
           
-          console.log(`📡 Insertando venta en tiempo real, timestamp: ${new Date(tsMillis).toLocaleString()}`);
+          logManager.info(`📡 Insertando venta en tiempo real, timestamp: ${new Date(tsMillis).toLocaleString()}`);
           const result = await insertSaleFromCloud({
             ts: tsMillis,
             total: s.total,
@@ -418,11 +425,12 @@ export async function initRealtimeSync() {
             notes: s.notes || '',
             items,
           });
-          console.log(`✅ Venta en tiempo real procesada: ${result}`);
+          logManager.info(`✅ Venta en tiempo real procesada: ${result}`);
         } catch (e) {
-          console.error('❌ Error procesando venta en tiempo real:', e);
+          logManager.error('❌ Error procesando venta en tiempo real:', e);
         }
       }
     )
     .subscribe();
 }
+

@@ -1,6 +1,7 @@
 // src/utils/supabaseStorage.js
 import * as FileSystem from 'expo-file-system';
 import { supabase } from '../supabaseClient';
+import { logManager } from './LogViewer';
 
 /**
  * Decodifica base64 a bytes sin usar atob
@@ -56,23 +57,23 @@ function getFileExtension(uri) {
 export async function uploadReceiptToSupabase(localUri, saleId) {
     const uploadStartTime = Date.now();
     try {
-        console.log('═══════════════════════════════════════════════════════');
-        console.log('📤 [UPLOAD INICIO] Subiendo comprobante a Supabase Storage');
-        console.log('═══════════════════════════════════════════════════════');
-        console.log(`⏰ Timestamp: ${new Date().toISOString()}`);
-        console.log(`📝 Sale ID: ${saleId}`);
-        console.log(`📁 URI Local: ${localUri}`);
+        logManager.info('═══════════════════════════════════════════════════════');
+        logManager.info('📤 [UPLOAD INICIO] Subiendo comprobante a Supabase Storage');
+        logManager.info('═══════════════════════════════════════════════════════');
+        logManager.info(`⏰ Timestamp: ${new Date().toISOString()}`);
+        logManager.info(`📝 Sale ID: ${saleId}`);
+        logManager.info(`📁 URI Local: ${localUri}`);
 
         // Validar que la URI existe
         if (!localUri) {
             throw new Error('URI local es vacía o undefined');
         }
 
-        console.log('⏳ [PASO 1] Leyendo archivo como base64...');
+        logManager.info('⏳ [PASO 1] Leyendo archivo como base64...');
         const base64Data = await FileSystem.readAsStringAsync(localUri, {
             encoding: FileSystem.EncodingType.Base64,
         });
-        console.log(`✅ Base64 leído: ${base64Data.length} caracteres`);
+        logManager.info(`✅ Base64 leído: ${base64Data.length} caracteres`);
 
         // Determinar extensión y tipo MIME
         const extension = getFileExtension(localUri);
@@ -83,20 +84,20 @@ export async function uploadReceiptToSupabase(localUri, saleId) {
         else if (extension === 'webp') contentType = 'image/webp';
         else if (extension === 'heic' || extension === 'heif') contentType = 'image/heic';
 
-        console.log(`✅ Extensión detectada: .${extension}`);
-        console.log(`✅ Content-Type: ${contentType}`);
-        console.log(`✅ Nombre de archivo generado: ${fileName}`);
+        logManager.info(`✅ Extensión detectada: .${extension}`);
+        logManager.info(`✅ Content-Type: ${contentType}`);
+        logManager.info(`✅ Nombre de archivo generado: ${fileName}`);
 
         // Convertir base64 a Uint8Array sin usar Buffer
-        console.log('⏳ [PASO 2] Convirtiendo base64 a ArrayBuffer...');
+        logManager.info('⏳ [PASO 2] Convirtiendo base64 a ArrayBuffer...');
         const bytes = base64ToBytes(base64Data);
-        console.log(`✅ ArrayBuffer creado: ${bytes.length} bytes`);
+        logManager.info(`✅ ArrayBuffer creado: ${bytes.length} bytes`);
 
         // Subir a Supabase Storage como ArrayBuffer
-        console.log('⏳ [PASO 3] Subiendo archivo a Supabase Storage...');
-        console.log(`   Bucket: 'uploads'`);
-        console.log(`   Archivo: ${fileName}`);
-        console.log(`   Tamaño: ${(bytes.length / 1024).toFixed(2)} KB`);
+        logManager.info('⏳ [PASO 3] Subiendo archivo a Supabase Storage...');
+        logManager.info(`   Bucket: 'uploads'`);
+        logManager.info(`   Archivo: ${fileName}`);
+        logManager.info(`   Tamaño: ${(bytes.length / 1024).toFixed(2)} KB`);
 
         const uploadStartTimeRequest = Date.now();
         const { data, error } = await supabase.storage
@@ -108,49 +109,49 @@ export async function uploadReceiptToSupabase(localUri, saleId) {
             });
         const uploadEndTimeRequest = Date.now();
 
-        console.log(`⏱️ Tiempo de request: ${uploadEndTimeRequest - uploadStartTimeRequest}ms`);
+        logManager.info(`⏱️ Tiempo de request: ${uploadEndTimeRequest - uploadStartTimeRequest}ms`);
 
         if (error) {
-            console.error('❌ [ERROR SUPABASE] Error en la respuesta de Supabase:');
-            console.error(`   Código: ${error.statusCode || 'N/A'}`);
-            console.error(`   Mensaje: ${error.message}`);
-            console.error(`   Error completo:`, error);
+            logManager.error('❌ [ERROR SUPABASE] Error en la respuesta de Supabase:');
+            logManager.error(`   Código: ${error.statusCode || 'N/A'}`);
+            logManager.error(`   Mensaje: ${error.message}`);
+            logManager.error(`   Error completo:`, error);
             throw new Error(`Error al subir archivo: ${error.message}`);
         }
 
         if (!data) {
-            console.warn('⚠️ Supabase retornó data vacía pero sin error');
+            logManager.warn('⚠️ Supabase retornó data vacía pero sin error');
         } else {
-            console.log(`✅ Response de Supabase:`, data);
+            logManager.info(`✅ Response de Supabase:`, data);
         }
 
         // Construir URL pública
         const publicUrl = `https://nuuoooqfbuwodagvmmsf.supabase.co/storage/v1/object/public/uploads/${fileName}`;
 
-        console.log('✅ [PASO 4] Construyendo URL pública...');
-        console.log(`   URL: ${publicUrl}`);
+        logManager.info('✅ [PASO 4] Construyendo URL pública...');
+        logManager.info(`   URL: ${publicUrl}`);
 
         const uploadEndTime = Date.now();
         const totalTime = uploadEndTime - uploadStartTime;
 
-        console.log('═══════════════════════════════════════════════════════');
-        console.log(`✅ [UPLOAD EXITOSO] Comprobante subido en ${totalTime}ms`);
-        console.log('═══════════════════════════════════════════════════════');
-        console.log(`📤 URL Final: ${publicUrl}`);
+        logManager.info('═══════════════════════════════════════════════════════');
+        logManager.info(`✅ [UPLOAD EXITOSO] Comprobante subido en ${totalTime}ms`);
+        logManager.info('═══════════════════════════════════════════════════════');
+        logManager.info(`📤 URL Final: ${publicUrl}`);
 
         return publicUrl;
     } catch (error) {
         const uploadEndTime = Date.now();
         const totalTime = uploadEndTime - uploadStartTime;
         
-        console.error('═══════════════════════════════════════════════════════');
-        console.error(`❌ [ERROR UPLOAD] Falló después de ${totalTime}ms`);
-        console.error('═══════════════════════════════════════════════════════');
-        console.error(`Error Type: ${error.name}`);
-        console.error(`Error Message: ${error.message}`);
-        console.error(`Error Stack: ${error.stack}`);
-        console.error(`Sale ID: ${saleId}`);
-        console.error(`Local URI: ${localUri}`);
+        logManager.error('═══════════════════════════════════════════════════════');
+        logManager.error(`❌ [ERROR UPLOAD] Falló después de ${totalTime}ms`);
+        logManager.error('═══════════════════════════════════════════════════════');
+        logManager.error(`Error Type: ${error.name}`);
+        logManager.error(`Error Message: ${error.message}`);
+        logManager.error(`Error Stack: ${error.stack}`);
+        logManager.error(`Sale ID: ${saleId}`);
+        logManager.error(`Local URI: ${localUri}`);
         
         throw error;
     }

@@ -816,21 +816,36 @@ export function getUnsyncedSales(){
           ORDER BY o.created_at ASC
           LIMIT 50;`,
         [], (_,_r)=> {
-          const list = rowsToArray(_r).map(r => ({
-            outbox_id: r.outbox_id,
-            local_sale_id: r.local_sale_id,
-            client_sale_id: r.client_sale_id,
-            items_json: JSON.parse(r.payload_json).items,
-            total: r.total,
-            payment_method: r.payment_method,
-            cash_received: r.cash_received,
-            change_given: r.change_given,
-            discount: r.discount,
-            tax: r.tax,
-            notes: r.notes,
-            transfer_receipt_uri: r.transfer_receipt_uri,
-            transfer_receipt_name: r.transfer_receipt_name
-          }));
+          const list = rowsToArray(_r).map(r => {
+            let payload = {};
+            try {
+              payload = JSON.parse(r.payload_json);
+            } catch (e) {
+              console.warn('⚠️ Error parseando payload_json:', e);
+              payload = {};
+            }
+            
+            // Priorizar transfer_receipt_uri/name de la tabla sales
+            // Si no existen, usar del payload como fallback
+            const transfer_receipt_uri = r.transfer_receipt_uri || payload.transfer_receipt_uri || null;
+            const transfer_receipt_name = r.transfer_receipt_name || payload.transfer_receipt_name || null;
+            
+            return {
+              outbox_id: r.outbox_id,
+              local_sale_id: r.local_sale_id,
+              client_sale_id: r.client_sale_id,
+              items_json: payload.items,
+              total: r.total,
+              payment_method: r.payment_method,
+              cash_received: r.cash_received,
+              change_given: r.change_given,
+              discount: r.discount,
+              tax: r.tax,
+              notes: r.notes,
+              transfer_receipt_uri,
+              transfer_receipt_name
+            };
+          });
           resolve(list);
         }
       );
