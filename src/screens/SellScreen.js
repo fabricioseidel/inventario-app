@@ -300,7 +300,18 @@ export default function SellScreen({
           console.log(`   ID temporal: ${tempSaleId}`);
           
           receiptUrl = await uploadReceiptToSupabase(proof.uri, tempSaleId);
+          
+          console.log(`⏳ [DEBUG] Valor retornado de uploadReceiptToSupabase:`);
+          console.log(`   Type: ${typeof receiptUrl}`);
+          console.log(`   Value: ${receiptUrl}`);
+          console.log(`   Length: ${receiptUrl ? receiptUrl.length : 'null'}`);
+          
           receiptName = proof.name;
+          
+          if (!receiptUrl) {
+            console.warn(`⚠️ [ADVERTENCIA] uploadReceiptToSupabase retornó un valor vacío`);
+            throw new Error('uploadReceiptToSupabase retornó null o undefined');
+          }
           
           console.log(`✅ [PASO 2] Comprobante subido exitosamente`);
           console.log(`   URL: ${receiptUrl}`);

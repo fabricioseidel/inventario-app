@@ -66,7 +66,8 @@ export async function pushSales() {
     console.log(`📋 Venta: ${s.client_sale_id}`);
     console.log(`   Total: $${s.total}`);
     console.log(`   Método: ${s.payment_method}`);
-    console.log(`   Comprobante: ${s.transfer_receipt_uri ? '✅ Sí' : '❌ No'}`);
+    console.log(`   Comprobante URI: ${s.transfer_receipt_uri ? '✅ ' + s.transfer_receipt_uri.substring(0, 60) + '...' : '❌ No'}`);
+    console.log(`   Comprobante Nombre: ${s.transfer_receipt_name || '❌ No'}`);
     console.log(`   Items: ${s.items_json ? Object.keys(JSON.parse(s.items_json || '{}')).length : 0}`);
     
     const payload = {
@@ -87,6 +88,10 @@ export async function pushSales() {
     };
     
     console.log(`⏳ Enviando RPC 'apply_sale'...`);
+    console.log(`   📎 Parámetros de comprobante:`);
+    console.log(`      - URI: ${payload.p_transfer_receipt_uri ? payload.p_transfer_receipt_uri.substring(0, 50) + '...' : 'null'}`);
+    console.log(`      - Nombre: ${payload.p_transfer_receipt_name || 'null'}`);
+    
     const rpcStartTime = Date.now();
     
     const { data, error } = await supabase.rpc('apply_sale', payload);
@@ -99,11 +104,14 @@ export async function pushSales() {
       console.error(`   Código: ${error.statusCode || 'N/A'}`);
       console.error(`   Mensaje: ${error.message}`);
       console.error(`   Venta: ${s.client_sale_id}`);
-      console.error(`   Payload: ${JSON.stringify(payload)}`);
+      console.error(`   📎 Comprobante URI enviado: ${payload.p_transfer_receipt_uri}`);
+      console.error(`   📎 Comprobante Nombre enviado: ${payload.p_transfer_receipt_name}`);
+      console.error(`   Payload completo:`, payload);
     } else {
       successCount++;
       console.log(`✅ [RPC OK] Completado en ${rpcDuration}ms`);
       console.log(`   ID en Supabase: ${data}`);
+      console.log(`   📎 Comprobante guardado en Supabase: ${payload.p_transfer_receipt_uri ? 'Sí ✅' : 'No'}`);
       await markSaleSynced(s.local_sale_id, data);
     }
   }

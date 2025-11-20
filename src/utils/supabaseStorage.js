@@ -3,6 +3,28 @@ import * as FileSystem from 'expo-file-system';
 import { supabase } from '../supabaseClient';
 
 /**
+ * Decodifica base64 a bytes sin usar atob
+ * Funciona en React Native y navegadores
+ */
+function base64ToBytes(base64String) {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+    const bytes = [];
+    
+    for (let i = 0; i < base64String.length; i += 4) {
+        const a = chars.indexOf(base64String[i]);
+        const b = chars.indexOf(base64String[i + 1]);
+        const c = chars.indexOf(base64String[i + 2]);
+        const d = chars.indexOf(base64String[i + 3]);
+
+        bytes.push((a << 2) | (b >> 4));
+        if (c !== 64) bytes.push(((b & 15) << 4) | (c >> 2));
+        if (d !== 64) bytes.push(((c & 3) << 6) | d);
+    }
+    
+    return new Uint8Array(bytes);
+}
+
+/**
  * Genera un nombre único para el archivo de comprobante
  * Formato: comprobante-{saleId}-{timestamp}-{random}.{ext}
  */
@@ -65,14 +87,9 @@ export async function uploadReceiptToSupabase(localUri, saleId) {
         console.log(`✅ Content-Type: ${contentType}`);
         console.log(`✅ Nombre de archivo generado: ${fileName}`);
 
-        // Convertir base64 a Uint8Array
+        // Convertir base64 a Uint8Array sin usar Buffer
         console.log('⏳ [PASO 2] Convirtiendo base64 a ArrayBuffer...');
-        const binaryString = Buffer.from(base64Data, 'base64').toString('binary');
-        const len = binaryString.length;
-        const bytes = new Uint8Array(len);
-        for (let i = 0; i < len; i++) {
-            bytes[i] = binaryString.charCodeAt(i);
-        }
+        const bytes = base64ToBytes(base64Data);
         console.log(`✅ ArrayBuffer creado: ${bytes.length} bytes`);
 
         // Subir a Supabase Storage como ArrayBuffer

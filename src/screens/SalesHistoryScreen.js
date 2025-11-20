@@ -132,10 +132,30 @@ export default function SalesHistoryScreen({ onClose, refreshKey }) {
       if (localUri.startsWith('file://') || localUri.includes('Documents')) {
         isLocalFile = true;
         console.log('⏳ [PASO 1] Detectado archivo local - procediendo con upload');
-        uploadedUrl = await uploadReceiptToSupabase(localUri, detail.sale.id);
-        uploadedName = displayName || getFileDisplayName(localUri) || null;
-        console.log(`✅ [PASO 2] Archivo subido a Supabase`);
-        console.log(`   URL: ${uploadedUrl}`);
+        
+        try {
+          uploadedUrl = await uploadReceiptToSupabase(localUri, detail.sale.id);
+          
+          console.log(`⏳ [DEBUG] Valor retornado de uploadReceiptToSupabase:`);
+          console.log(`   Type: ${typeof uploadedUrl}`);
+          console.log(`   Value: ${uploadedUrl}`);
+          console.log(`   Length: ${uploadedUrl ? uploadedUrl.length : 'null'}`);
+          
+          if (!uploadedUrl) {
+            throw new Error('uploadReceiptToSupabase retornó null o undefined');
+          }
+          
+          uploadedName = displayName || getFileDisplayName(localUri) || null;
+          console.log(`✅ [PASO 2] Archivo subido a Supabase`);
+          console.log(`   URL: ${uploadedUrl}`);
+        } catch (uploadError) {
+          console.error('❌ [ERROR EN UPLOAD]');
+          console.error(`   Message: ${uploadError.message}`);
+          console.error(`   Stack: ${uploadError.stack}`);
+          console.error(`   Sale ID: ${detail.sale.id}`);
+          console.error(`   Local URI: ${localUri.substring(0, 80)}`);
+          throw uploadError;
+        }
       } else {
         // Si ya es una URL (de otro dispositivo), usarla directamente
         isLocalFile = false;
