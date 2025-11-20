@@ -56,68 +56,75 @@ export async function pushSales() {
   let errorCount = 0;
   
   for (const s of pending) {
-    // 🔧 FIX: Usar el timestamp original de la venta, no el momento del sync
-    let originalTimestamp;
-    if (s.ts) {
-      // Convertir timestamp local a ISO string para enviar a Supabase
-      originalTimestamp = new Date(s.ts).toISOString();
-    }
-    
-    logManager.info('───────────────────────────────────────────────────────');
-    logManager.info(`📋 Venta: ${s.client_sale_id}`);
-    logManager.info(`   Total: $${s.total}`);
-    logManager.info(`   Método: ${s.payment_method}`);
-    logManager.info(`   Comprobante URI: ${s.transfer_receipt_uri ? '✅ ' + s.transfer_receipt_uri.substring(0, 60) + '...' : '❌ No'}`);
-    logManager.info(`   Comprobante Nombre: ${s.transfer_receipt_name || '❌ No'}`);
-    logManager.info(`   Items: ${s.items_json ? Object.keys(JSON.parse(s.items_json || '{}')).length : 0}`);
-    
-    const itemsJson = typeof s.items_json === 'string' 
-      ? s.items_json 
-      : JSON.stringify(s.items_json || {});
-    
-    const payload = {
-      p_total: s.total,
-      p_payment_method: s.payment_method,
-      p_cash_received: s.cash_received || 0,
-      p_change_given: s.change_given || 0,
-      p_discount: s.discount || 0,
-      p_tax: s.tax || 0,
-      p_notes: s.notes || '',
-      p_device_id: deviceId,
-      p_client_sale_id: s.client_sale_id,
-      p_items: itemsJson,
-      p_timestamp: originalTimestamp,  // 🔧 Enviar timestamp original
-      p_seller_name: sellerName,  // 🆕 Agregar nombre del vendedor
-      p_transfer_receipt_uri: s.transfer_receipt_uri || null,  // 🆕 URL pública de comprobante
-      p_transfer_receipt_name: s.transfer_receipt_name || null  // 🆕 Nombre del comprobante
-    };
-    
-    logManager.info(`⏳ Enviando RPC 'apply_sale'...`);
-    logManager.info(`   📎 Parámetros de comprobante:`);
-    logManager.info(`      - URI: ${payload.p_transfer_receipt_uri ? payload.p_transfer_receipt_uri.substring(0, 50) + '...' : 'null'}`);
-    logManager.info(`      - Nombre: ${payload.p_transfer_receipt_name || 'null'}`);
-    
-    const rpcStartTime = Date.now();
-    
-    const { data, error } = await supabase.rpc('apply_sale', payload);
-    
-    const rpcDuration = Date.now() - rpcStartTime;
-    
-    if (error) {
+    try {
+      // 🔧 FIX: Usar el timestamp original de la venta, no el momento del sync
+      let originalTimestamp;
+      if (s.ts) {
+        // Convertir timestamp local a ISO string para enviar a Supabase
+        originalTimestamp = new Date(s.ts).toISOString();
+      }
+      
+      logManager.info('───────────────────────────────────────────────────────');
+      logManager.info(`📋 Venta: ${s.client_sale_id}`);
+      logManager.info(`   Total: $${s.total}`);
+      logManager.info(`   Método: ${s.payment_method}`);
+      logManager.info(`   Comprobante URI: ${s.transfer_receipt_uri ? '✅ ' + s.transfer_receipt_uri.substring(0, 60) + '...' : '❌ No'}`);
+      logManager.info(`   Comprobante Nombre: ${s.transfer_receipt_name || '❌ No'}`);
+      logManager.info(`   Items: ${s.items_json ? Object.keys(JSON.parse(s.items_json || '{}')).length : 0}`);
+      
+      const itemsJson = typeof s.items_json === 'string' 
+        ? s.items_json 
+        : JSON.stringify(s.items_json || {});
+      
+      const payload = {
+        p_total: s.total,
+        p_payment_method: s.payment_method,
+        p_cash_received: s.cash_received || 0,
+        p_change_given: s.change_given || 0,
+        p_discount: s.discount || 0,
+        p_tax: s.tax || 0,
+        p_notes: s.notes || '',
+        p_device_id: deviceId,
+        p_client_sale_id: s.client_sale_id,
+        p_items: itemsJson,
+        p_timestamp: originalTimestamp,  // 🔧 Enviar timestamp original
+        p_seller_name: sellerName,  // 🆕 Agregar nombre del vendedor
+        p_transfer_receipt_uri: s.transfer_receipt_uri || null,  // 🆕 URL pública de comprobante
+        p_transfer_receipt_name: s.transfer_receipt_name || null  // 🆕 Nombre del comprobante
+      };
+      
+      logManager.info(`⏳ Enviando RPC 'apply_sale'...`);
+      logManager.info(`   📎 Parámetros de comprobante:`);
+      logManager.info(`      - URI: ${payload.p_transfer_receipt_uri ? payload.p_transfer_receipt_uri.substring(0, 50) + '...' : 'null'}`);
+      logManager.info(`      - Nombre: ${payload.p_transfer_receipt_name || 'null'}`);
+      
+      const rpcStartTime = Date.now();
+      
+      const { data, error } = await supabase.rpc('apply_sale', payload);
+      
+      const rpcDuration = Date.now() - rpcStartTime;
+      
+      if (error) {
+        errorCount++;
+        const errorMsg = error.message || error.details || error.hint || JSON.stringify(error) || 'Error desconocido';
+        logManager.error(`❌ [ERROR RPC] Fallo después de ${rpcDuration}ms`);
+        logManager.error(`   Código: ${error.statusCode || error.code || 'N/A'}`);
+        logManager.error(`   Mensaje: ${errorMsg}`);
+        logManager.error(`   Venta: ${s.client_sale_id}`);
+        logManager.error(`   📎 Comprobante URI enviado: ${payload.p_transfer_receipt_uri}`);
+        logManager.error(`   📎 Comprobante Nombre enviado: ${payload.p_transfer_receipt_name}`);
+      } else {
+        successCount++;
+        logManager.info(`✅ [RPC OK] Completado en ${rpcDuration}ms`);
+        logManager.info(`   ID en Supabase: ${data}`);
+        logManager.info(`   📎 Comprobante guardado en Supabase: ${payload.p_transfer_receipt_uri ? 'Sí ✅' : 'No'}`);
+        await markSaleSynced(s.local_sale_id, data);
+      }
+    } catch (itemError) {
       errorCount++;
-      logManager.error(`❌ [ERROR RPC] Fallo después de ${rpcDuration}ms`);
-      logManager.error(`   Código: ${error.statusCode || 'N/A'}`);
-      logManager.error(`   Mensaje: ${error.message}`);
-      logManager.error(`   Venta: ${s.client_sale_id}`);
-      logManager.error(`   📎 Comprobante URI enviado: ${payload.p_transfer_receipt_uri}`);
-      logManager.error(`   📎 Comprobante Nombre enviado: ${payload.p_transfer_receipt_name}`);
-      logManager.error(`   Payload completo:`, payload);
-    } else {
-      successCount++;
-      logManager.info(`✅ [RPC OK] Completado en ${rpcDuration}ms`);
-      logManager.info(`   ID en Supabase: ${data}`);
-      logManager.info(`   📎 Comprobante guardado en Supabase: ${payload.p_transfer_receipt_uri ? 'Sí ✅' : 'No'}`);
-      await markSaleSynced(s.local_sale_id, data);
+      logManager.error(`❌ [ERROR ITERACIÓN] Error procesando venta ${s.client_sale_id}`);
+      logManager.error(`   Mensaje: ${itemError?.message || JSON.stringify(itemError)}`);
+      logManager.error(`   Stack: ${itemError?.stack}`);
     }
   }
   
@@ -324,7 +331,8 @@ export async function syncNow() {
     try {
       await pushSales();
     } catch (e) {
-      logManager.warn('⚠️ Error subiendo ventas:', e);
+      const errMsg = e?.message || e?.toString?.() || JSON.stringify(e) || 'Error desconocido';
+      logManager.error('⚠️ Error subiendo ventas:', errMsg);
       // Continuamos con el proceso
     }
 
@@ -334,7 +342,8 @@ export async function syncNow() {
       const lastProductTs = await listLocalProductsUpdatedAfter();
       await pullProducts({ sinceTs: lastProductTs });
     } catch (e) {
-      logManager.warn('⚠️ Error descargando productos:', e);
+      const errMsg = e?.message || e?.toString?.() || JSON.stringify(e) || 'Error desconocido';
+      logManager.error('⚠️ Error descargando productos:', errMsg);
     }
     
     logManager.info('📥 Descargando ventas...');
@@ -342,7 +351,8 @@ export async function syncNow() {
       const lastSaleTs = await getLastSaleTs();
       await pullSales({ sinceTs: lastSaleTs });
     } catch (e) {
-      logManager.warn('⚠️ Error descargando ventas:', e);
+      const errMsg = e?.message || e?.toString?.() || JSON.stringify(e) || 'Error desconocido';
+      logManager.error('⚠️ Error descargando ventas:', errMsg);
     }
     
     logManager.info('✅ Sincronización completada exitosamente');
