@@ -155,7 +155,11 @@ export default function SalesHistoryScreen({ onClose, refreshKey }) {
           console.error(`   Stack: ${uploadError.stack}`);
           console.error(`   Sale ID: ${detail.sale.id}`);
           console.error(`   Local URI: ${localUri.substring(0, 80)}`);
-          throw uploadError;
+          
+          // 🆕 OFFLINE SUPPORT: Si falla la subida, guardamos localmente
+          console.log('⚠️ [OFFLINE SUPPORT] Falló subida, guardando URI local para sincronización posterior');
+          uploadedUrl = localUri;
+          uploadedName = displayName || getFileDisplayName(localUri) || null;
         }
       } else {
         // Si ya es una URL (de otro dispositivo), usarla directamente

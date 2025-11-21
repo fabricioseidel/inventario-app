@@ -6,10 +6,12 @@ import {
   getUnsyncedSales, markSaleSynced,
   upsertProductsBulk, upsertCategoriesBulk,
   listLocalProductsUpdatedAfter, listProducts, listCategories,
-  insertSaleFromCloud, insertOrUpdateProduct, getLastSaleTs
+  insertSaleFromCloud, insertOrUpdateProduct, getLastSaleTs,
+  getSaleWithItems, getOutboxByCloudSaleId
 } from './db';
 import { AuthManager } from './auth/AuthManager';
 import { logManager } from './utils/LogViewer';
+import { uploadReceiptToSupabase, isLocalUrl } from './utils/supabaseStorage';
 
 const DEVICE_KEY = 'device_id';
 let DEVICE_ID = null;
@@ -70,7 +72,6 @@ export async function pushSales() {
       logManager.info(`   Método: ${s.payment_method}`);
       logManager.info(`   Comprobante URI: ${s.transfer_receipt_uri ? '✅ ' + s.transfer_receipt_uri.substring(0, 60) + '...' : '❌ No'}`);
       logManager.info(`   Comprobante Nombre: ${s.transfer_receipt_name || '❌ No'}`);
-      logManager.info(`   Items: ${s.items_json ? Object.keys(JSON.parse(s.items_json || '{}')).length : 0}`);
       
       // Parsear items_json para convertirlo a objeto (no string)
       let itemsArray = [];
@@ -85,6 +86,59 @@ export async function pushSales() {
         itemsArray = [];
       }
       
+      // 🆕 VALIDACIÓN CRÍTICA: Si items está vacío, reconstruir desde la BD
+      if (!Array.isArray(itemsArray) || itemsArray.length === 0) {
+        logManager.warn(`⚠️ Items vacío para venta ${s.client_sale_id}, reconstruyendo desde BD...`);
+        try {
+          const saleData = await getSaleWithItems(s.local_sale_id);
+          if (saleData && saleData.items && saleData.items.length > 0) {
+            itemsArray = saleData.items.map(it => ({
+              barcode: String(it.barcode),
+              name: it.name || null,
+              qty: Number(it.qty || 0),
+              unit_price: Number(it.unit_price || 0),
+              subtotal: Number(it.subtotal || 0)
+            }));
+            logManager.info(`✅ Items reconstruidos: ${itemsArray.length} productos`);
+          } else {
+            logManager.error(`❌ No se pudieron reconstruir items para venta ${s.client_sale_id}`);
+            errorCount++;
+            continue; // Saltar esta venta
+          }
+        } catch (rebuildError) {
+          logManager.error(`❌ Error reconstruyendo items: ${rebuildError.message}`);
+          errorCount++;
+          continue; // Saltar esta venta
+        }
+      }
+      
+      logManager.info(`   Items validados: ${itemsArray.length}`);
+      
+      // 🆕 Subir comprobante si es local
+      let finalTransferUri = s.transfer_receipt_uri;
+      if (finalTransferUri && isLocalUrl(finalTransferUri)) {
+        try {
+          logManager.info(`📤 Detectado comprobante local, subiendo a Supabase...`);
+          // Usar client_sale_id para el nombre del archivo para garantizar unicidad
+          finalTransferUri = await uploadReceiptToSupabase(finalTransferUri, s.client_sale_id);
+          logManager.info(`✅ Comprobante subido exitosamente: ${finalTransferUri}`);
+        } catch (uploadErr) {
+          logManager.error(`❌ Error subiendo comprobante: ${uploadErr.message}`);
+          logManager.error(`   Stack: ${uploadErr.stack}`);
+          // Si falla la subida del comprobante, continuamos con null para no bloquear la venta
+          finalTransferUri = null;
+        }
+      }
+      // Asegurar campo discount presente (0 por defecto)
+      itemsArray = itemsArray.map(it => ({
+        barcode: it.barcode,
+        name: it.name,
+        qty: it.qty,
+        unit_price: it.unit_price,
+        subtotal: it.subtotal,
+        discount: typeof it.discount === 'number' ? it.discount : 0
+      }));
+      
       const payload = {
         p_total: s.total,
         p_payment_method: s.payment_method,
@@ -98,7 +152,7 @@ export async function pushSales() {
         p_items: itemsArray,  // 🔧 Enviar como objeto/array, no como string
         p_timestamp: originalTimestamp,  // 🔧 Enviar timestamp original
         p_seller_name: sellerName,  // 🆕 Agregar nombre del vendedor
-        p_transfer_receipt_uri: s.transfer_receipt_uri || null,  // 🆕 URL pública de comprobante
+        p_transfer_receipt_uri: finalTransferUri || null,  // 🆕 URL pública de comprobante (o local si falló subida)
         p_transfer_receipt_name: s.transfer_receipt_name || null  // 🆕 Nombre del comprobante
       };
       
@@ -109,7 +163,7 @@ export async function pushSales() {
       
       const rpcStartTime = Date.now();
       
-      const { data, error } = await supabase.rpc('apply_sale', payload);
+      const { data, error } = await supabase.rpc('apply_sale_v2', payload);
       
       const rpcDuration = Date.now() - rpcStartTime;
       
@@ -146,6 +200,71 @@ export async function pushSales() {
   logManager.info(`✅ Exitosas: ${successCount}`);
   logManager.info(`❌ Errores: ${errorCount}`);
   logManager.info(`📊 Total: ${pending.length}`);
+}
+
+// ---------- REPARACIÓN DE VENTAS REMOTAS SIN ITEMS ----------
+async function repairMissingRemoteSaleItems() {
+  const deviceId = await getDeviceId();
+  logManager.info('🔍 Buscando ventas remotas sin items para reparación...');
+  // RPC auxiliar: list_sales_missing_items debe existir en Supabase
+  const { data, error } = await supabase.rpc('list_sales_missing_items', { p_device_id: deviceId });
+  if (error) {
+    logManager.warn(`⚠️ No se pudo listar ventas sin items: ${error.message}`);
+    return;
+  }
+  if (!data || !data.length) {
+    logManager.info('✅ No hay ventas remotas sin items');
+    return;
+  }
+  logManager.info(`🔧 Ventas a reparar: ${data.length}`);
+  for (const row of data) {
+    try {
+      const remoteId = row.id;
+      const outbox = await getOutboxByCloudSaleId(remoteId);
+      if (!outbox) {
+        logManager.warn(`⚠️ No se encontró payload local para venta remota id=${remoteId}`);
+        continue;
+      }
+      const p = outbox.payload || {};
+      const itemsArray = Array.isArray(p.items) ? p.items.map(it => ({
+        barcode: it.barcode,
+        name: it.name,
+        qty: it.qty,
+        unit_price: it.unit_price,
+        subtotal: it.subtotal,
+        discount: typeof it.discount === 'number' ? it.discount : 0
+      })) : [];
+      if (!itemsArray.length) {
+        logManager.warn(`⚠️ Payload sin items para cloud_sale_id=${remoteId}`);
+        continue;
+      }
+      logManager.info(`♻️ Reenviando items para venta remota id=${remoteId}`);
+      const { error: rpcErr } = await supabase.rpc('apply_sale_v2', {
+        p_total: p.total,
+        p_payment_method: p.payment_method,
+        p_cash_received: p.cash_received,
+        p_change_given: p.change_given,
+        p_discount: p.discount,
+        p_tax: p.tax,
+        p_notes: p.notes,
+        p_device_id: deviceId,
+        p_client_sale_id: p.client_sale_id,
+        p_items: itemsArray,
+        p_timestamp: new Date(outbox.local_sale_id ? (await getSaleWithItems(outbox.local_sale_id))?.sale?.ts : Date.now()).toISOString(),
+        p_seller_name: null,
+        p_transfer_receipt_uri: p.transfer_receipt_uri || null,
+        p_transfer_receipt_name: p.transfer_receipt_name || null,
+        p_update_if_exists: true
+      });
+      if (rpcErr) {
+        logManager.error(`❌ Error reparando venta id=${remoteId}: ${rpcErr.message}`);
+      } else {
+        logManager.info(`✅ Reparación exitosa venta id=${remoteId}`);
+      }
+    } catch (e) {
+      logManager.error(`❌ Excepción reparando venta remota: ${e.message}`);
+    }
+  }
 }
 
 // ---------- PRODUCTOS ----------
@@ -286,6 +405,7 @@ export async function pullSales({ sinceTs } = {}) {
           notes: s.notes || '',
           transfer_receipt_uri: s.transfer_receipt_uri || null,  // 🆕 Sincronizar comprobantes desde otros dispositivos
           transfer_receipt_name: s.transfer_receipt_name || null, // 🆕 Sincronizar nombre del comprobante
+          cloud_id: s.id, // 🆕 Guardar ID de nube
           items,
         });
         
@@ -343,6 +463,13 @@ export async function syncNow() {
       const errMsg = e?.message || e?.toString?.() || JSON.stringify(e) || 'Error desconocido';
       logManager.error('⚠️ Error subiendo ventas:', errMsg);
       // Continuamos con el proceso
+    }
+
+    // Reparar ventas remotas que se crearon sin items (migración histórica)
+    try {
+      await repairMissingRemoteSaleItems();
+    } catch (e) {
+      logManager.warn(`⚠️ Error reparación ventas: ${e.message}`);
     }
 
     // 2) Luego bajar lo más reciente
@@ -442,6 +569,7 @@ export async function initRealtimeSync() {
             discount: s.discount || 0,
             tax: s.tax || 0,
             notes: s.notes || '',
+            cloud_id: s.id, // 🆕 Guardar ID de nube
             items,
           });
           logManager.info(`✅ Venta en tiempo real procesada: ${result}`);

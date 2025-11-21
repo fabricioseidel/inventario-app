@@ -324,8 +324,14 @@ export default function SellScreen({
           console.error(`Error: ${uploadError.message}`);
           console.error(`Stack: ${uploadError.stack}`);
           console.error(`Sale ID temporal: temp-${Date.now()}`);
-          Alert.alert('Error en Comprobante', `No se pudo subir el comprobante: ${uploadError.message}\n\nLa venta se registrará sin comprobante.`);
-          // Continuamos sin comprobante
+          
+          // 🆕 OFFLINE SUPPORT: Si falla la subida (ej. sin internet), guardamos la URI local
+          // El proceso de sync (pushSales) se encargará de subirla cuando haya conexión
+          console.log('⚠️ [OFFLINE SUPPORT] Falló subida, guardando URI local para sincronización posterior');
+          receiptUrl = proof.uri;
+          receiptName = proof.name;
+          
+          // Alert.alert('Aviso', 'No hay conexión para subir el comprobante. Se guardará localmente y se subirá cuando recuperes la conexión.');
         }
       }
 

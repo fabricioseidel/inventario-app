@@ -50,6 +50,8 @@ function migrateSalesSchema(tx, done){
     { name:'tax',            def:'REAL DEFAULT 0' },
     { name:'notes',          def:'TEXT' },
     { name:'voided',         def:'INTEGER DEFAULT 0' },
+    { name:'is_synced',      def:'INTEGER DEFAULT 0' },
+    { name:'cloud_id',       def:'TEXT' },
   ];
   ensureColumnsInTable(tx, 'sales', cols, ()=> ensureColumnsInTable(tx, 'sale', cols, ()=> done&&done()));
 }
@@ -587,8 +589,8 @@ export function insertSaleFromCloud(payload){
           
           // No existe, proceder con la inserción
           tx.executeSql(
-            `INSERT INTO sales (ts,total,payment_method,cash_received,change_given,discount,tax,notes,transfer_receipt_uri,transfer_receipt_name,voided,is_synced,cloud_id)
-             VALUES (?,?,?,?,?,?,?,?,?,?,0,1,?);`,
+            `INSERT INTO sales (ts,total,payment_method,cash_received,change_given,discount,tax,notes,transfer_receipt_uri,transfer_receipt_name,voided,cloud_id)
+             VALUES (?,?,?,?,?,?,?,?,?,?,0,?);`,
             [ts,total,payment,cashReceived,change,discount,tax,notes,transferUri,transferName,cloudId],
             (_insert,res)=>{
               const saleId = res.insertId;
@@ -857,7 +859,28 @@ export function markSaleSynced(localSaleId, cloudSaleId){
     const now=Date.now();
     db().transaction((tx)=>{
       tx.executeSql(`UPDATE outbox_sales SET synced=1, cloud_sale_id=?, synced_at=? WHERE local_sale_id=?;`, [String(cloudSaleId||''), now, localSaleId]);
+      // Guardar también el cloud_id en la tabla sales para facilitar reparaciones
+      tx.executeSql(`UPDATE sales SET cloud_id=? WHERE id=?;`, [String(cloudSaleId||''), localSaleId]);
     }, reject, ()=>resolve(true));
+  });
+}
+
+// Obtener outbox por cloud_sale_id (para reparar items faltantes)
+export function getOutboxByCloudSaleId(cloudSaleId){
+  return new Promise((resolve,reject)=>{
+    db().transaction((tx)=>{
+      tx.executeSql(
+        `SELECT local_sale_id, client_sale_id, payload_json FROM outbox_sales WHERE cloud_sale_id=? LIMIT 1;`,
+        [String(cloudSaleId)],
+        (_,_r)=>{
+          if(!_r.rows.length) return resolve(null);
+          const row=_r.rows.item(0);
+          let payload={};
+          try{ payload=JSON.parse(row.payload_json); }catch(e){ payload={}; }
+          resolve({ local_sale_id: row.local_sale_id, client_sale_id: row.client_sale_id, payload });
+        }
+      );
+    }, reject);
   });
 }
 
