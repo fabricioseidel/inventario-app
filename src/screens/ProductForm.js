@@ -41,6 +41,16 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
     return cats.filter(c => String(c.name || '').toLowerCase().includes(q));
   }, [catSearch, cats]);
 
+  const performSave = async (payload) => {
+    try {
+      await insertOrUpdateProduct(payload);
+      Alert.alert('Guardado', 'Producto guardado correctamente.');
+      onSaved && onSaved(payload.barcode);
+    } catch (e) {
+      Alert.alert('Error', 'No se pudo guardar el producto.');
+    }
+  };
+
   const save = async () => {
     const payload = {
       barcode: String(barcode || '').trim(),
@@ -63,20 +73,46 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
       try {
         const existing = await getProductByBarcode(payload.barcode);
         if (existing) {
-          return Alert.alert('Código existente', 'Ya existe un producto con este código de barras. Si quieres editarlo, búscalo primero.');
+          return Alert.alert(
+            'Producto existente',
+            `El código ${payload.barcode} ya existe (${existing.name}). ¿Deseas actualizarlo?`,
+            [
+              { text: 'Cancelar', style: 'cancel' },
+              { text: 'Actualizar', onPress: () => performSave(payload) }
+            ]
+          );
         }
       } catch (e) {
         console.warn('Error checking barcode:', e);
       }
     }
 
+    await performSave(payload);
+  };
+
+  const checkExistingBarcode = async () => {
+    if (!barcode || (initial && initial.barcode)) return;
     try {
-      await insertOrUpdateProduct(payload);
-      Alert.alert('Guardado', 'Producto guardado correctamente.');
-      onSaved && onSaved(payload.barcode);
-    } catch (e) {
-      Alert.alert('Error', 'No se pudo guardar el producto.');
-    }
+      const existing = await getProductByBarcode(barcode.trim());
+      if (existing) {
+        Alert.alert(
+          'Producto encontrado',
+          `El código ${barcode} corresponde a "${existing.name}". ¿Cargar datos para editar?`,
+          [
+            { text: 'No', style: 'cancel' },
+            { text: 'Sí, cargar', onPress: () => {
+                setName(existing.name || '');
+                setCategory(existing.category || '');
+                setPurchasePrice(String(existing.purchase_price ?? ''));
+                setSalePrice(String(existing.sale_price ?? ''));
+                setExpiryDate(existing.expiry_date || '');
+                setStock(String(existing.stock ?? ''));
+                setSoldByWeight(existing.sold_by_weight ? true : false);
+            }}
+          ]
+        );
+      }
+    } catch (e) {}
   };
 
   const addCat = async () => {
@@ -95,7 +131,14 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.select({ ios: 'padding', android: undefined })}>
       <ScrollView style={{ flex: 1, paddingHorizontal: 16, paddingTop: 8 }} contentContainerStyle={{ paddingBottom: 90 }}>
         <Field label="Código de barras">
-          <TextInput style={styles.input} value={barcode} onChangeText={setBarcode} placeholder="Ej: 7800000000001" keyboardType="numeric" />
+          <TextInput 
+            style={styles.input} 
+            value={barcode} 
+            onChangeText={setBarcode} 
+            placeholder="Ej: 7800000000001" 
+            keyboardType="numeric" 
+            onBlur={checkExistingBarcode}
+          />
         </Field>
 
         <Field label="Nombre">

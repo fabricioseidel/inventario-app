@@ -418,12 +418,14 @@ export default function SellScreen({
           </TouchableOpacity>
           <TextInput
             style={[styles.input, { flex: 1 }]}
-            placeholder="Código manual…"
+            placeholder="Código manual (o escanear)…"
             value={barcodeManual}
             onChangeText={setBarcodeManual}
             onSubmitEditing={addManual}
             keyboardType="numeric"
             returnKeyType="done"
+            blurOnSubmit={false} // Mantiene el foco para escaneo continuo
+            autoFocus={true} // Foco inicial para escanear directo
           />
           <TouchableOpacity style={[styles.ghostBtn, styles.ghostBtnCompact]} onPress={addManual}>
             <Text style={styles.ghostBtnText}>Agregar</Text>

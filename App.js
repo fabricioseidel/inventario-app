@@ -466,9 +466,19 @@ export default function App() {
             contentContainerStyle={{ paddingBottom: 120 }}
             renderItem={renderProduct}
             ListEmptyComponent={
-              <Text style={styles.emptyText}>
-                {search ? 'Sin resultados para tu búsqueda' : 'Escribe para buscar productos'}
-              </Text>
+              <View style={{ alignItems: 'center', marginTop: 24 }}>
+                <Text style={styles.emptyText}>
+                  {search ? 'Sin resultados para tu búsqueda' : 'Escribe para buscar productos'}
+                </Text>
+                {search && /^\d+$/.test(search) && (
+                  <TouchableOpacity 
+                    style={[styles.primaryBtn, { marginTop: 16, backgroundColor: '#111', paddingHorizontal: 20, paddingVertical: 12, borderRadius: 8 }]}
+                    onPress={() => handleOpenNewProductFromSale(search)}
+                  >
+                    <Text style={{ color: '#fff', fontWeight: 'bold' }}>Crear producto con código {search}</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
             }
             initialNumToRender={10}
             maxToRenderPerBatch={10}

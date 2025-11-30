@@ -335,29 +335,49 @@ export async function pullSales({ sinceTs } = {}) {
   logManager.info(`⏳ [PASO 1] Consultando tabla 'sales'...`);
   const queryStartTime = Date.now();
   
-  const { data: sales, error } = await supabase
+  // 1. Obtener ventas nuevas (por timestamp)
+  const { data: newSales, error: errorNew } = await supabase
     .from('sales')
     .select('*')
-    .gt('ts', sinceIso)  // 🔧 Usar ts en lugar de created_at
+    .gt('ts', sinceIso)
     .neq('device_id', deviceId)
-    .order('ts', { ascending: true })  // 🔧 Ordenar por ts
-    .limit(1000);
+    .order('ts', { ascending: true })
+    .limit(500);
+
+  if (errorNew) {
+    logManager.error(`❌ Error consultando ventas nuevas: ${errorNew.message}`);
+    throw errorNew;
+  }
+
+  // 2. Obtener ventas recientes con comprobante (para capturar actualizaciones desde web)
+  // Buscamos ventas de los últimos 30 días que tengan comprobante, para asegurar que se descarguen
+  // aunque ya existan localmente (insertSaleFromCloud manejará la actualización)
+  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+  const { data: receiptSales, error: errorReceipts } = await supabase
+    .from('sales')
+    .select('*')
+    .gt('ts', thirtyDaysAgo)
+    .neq('transfer_receipt_uri', null) // Solo las que tienen comprobante
+    .neq('device_id', deviceId)
+    .limit(200);
+    
+  if (errorReceipts) {
+    logManager.warn(`⚠️ Error consultando ventas con comprobantes: ${errorReceipts.message}`);
+  }
+
+  // Combinar resultados eliminando duplicados por ID
+  const salesMap = new Map();
+  (newSales || []).forEach(s => salesMap.set(s.id, s));
+  (receiptSales || []).forEach(s => salesMap.set(s.id, s));
+  
+  const sales = Array.from(salesMap.values());
     
   const queryDuration = Date.now() - queryStartTime;
   
-  if (error) {
-    logManager.error('═══════════════════════════════════════════════════════');
-    logManager.error(`❌ [ERROR QUERY] Fallo después de ${queryDuration}ms`);
-    logManager.error('═══════════════════════════════════════════════════════');
-    logManager.error(`Error: ${error.message}`);
-    logManager.error(`Código: ${error.statusCode || 'N/A'}`);
-    throw error;
-  }
-  
   logManager.info(`✅ Query completada en ${queryDuration}ms`);
-  logManager.info(`📊 Ventas encontradas: ${sales?.length || 0}`);
+  logManager.info(`📊 Ventas encontradas: ${sales.length} (Nuevas: ${newSales?.length || 0}, Con comprobante: ${receiptSales?.length || 0})`);
   
-  if (!sales?.length) {
+  if (!sales.length) {
     logManager.info('✅ No hay ventas nuevas para sincronizar');
     return;
   }
@@ -365,7 +385,10 @@ export async function pullSales({ sinceTs } = {}) {
   let successCount = 0;
   let errorCount = 0;
   
-  if (sales?.length) {
+  if (sales.length) {
+    // Ordenar por timestamp para insertar en orden
+    sales.sort((a, b) => new Date(a.ts) - new Date(b.ts));
+
     for (const s of sales) {
       logManager.info('───────────────────────────────────────────────────────');
       logManager.info(`📋 Venta remota: ${s.id}`);

@@ -576,14 +576,38 @@ export function insertSaleFromCloud(payload){
   return new Promise((resolve,reject)=>{
     let firstError=null;
     db().transaction((tx)=>{
-      // Verificar si ya existe una venta con el mismo timestamp y total
+      // Verificar si ya existe una venta con el mismo timestamp y total, o por cloud_id
+      let query = `SELECT id, transfer_receipt_uri FROM sales WHERE ts = ? AND total = ? LIMIT 1;`;
+      let params = [ts, total];
+      
+      if (cloudId) {
+        query = `SELECT id, transfer_receipt_uri FROM sales WHERE cloud_id = ? OR (ts = ? AND total = ?) LIMIT 1;`;
+        params = [cloudId, ts, total];
+      }
+
       tx.executeSql(
-        `SELECT id FROM sales WHERE ts = ? AND total = ? LIMIT 1;`,
-        [ts, total],
+        query,
+        params,
         (_checkTx, checkRes) => {
           if (checkRes.rows.length > 0) {
-            console.log(`⏭️ Venta duplicada encontrada: ts=${ts}, total=${total}, saltando inserción`);
-            resolve(checkRes.rows.item(0).id);
+            const existing = checkRes.rows.item(0);
+            // Si existe, verificamos si necesitamos actualizar el comprobante
+            if (transferUri && existing.transfer_receipt_uri !== transferUri) {
+              console.log(`🔄 Actualizando comprobante para venta existente id=${existing.id}`);
+              tx.executeSql(
+                `UPDATE sales SET transfer_receipt_uri = ?, transfer_receipt_name = ?, cloud_id = ? WHERE id = ?;`,
+                [transferUri, transferName, cloudId, existing.id],
+                () => {
+                  console.log(`✅ Comprobante actualizado para venta ${existing.id}`);
+                },
+                (_, err) => console.warn('Error actualizando comprobante:', err)
+              );
+            } else if (cloudId && !existing.cloud_id) {
+               // Vincular cloud_id si falta
+               tx.executeSql(`UPDATE sales SET cloud_id = ? WHERE id = ?;`, [cloudId, existing.id]);
+            }
+            
+            resolve(existing.id);
             return;
           }
           
