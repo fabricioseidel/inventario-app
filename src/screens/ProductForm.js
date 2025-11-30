@@ -191,6 +191,14 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
     }
 
     await performSave(payload);
+    
+    // 🆕 Forzar sincronización de productos tras guardar
+    try {
+      const { pushProducts } = require('../sync');
+      pushProducts().catch(err => console.warn('Background push error:', err));
+    } catch (e) {
+      console.warn('Could not trigger background sync:', e);
+    }
   };
 
   const checkExistingBarcode = async () => {

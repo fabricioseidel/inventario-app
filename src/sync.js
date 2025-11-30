@@ -482,12 +482,12 @@ export async function syncNow() {
     
     // 🔧 COMENTADO TEMPORALMENTE: No subir productos masivamente al inicio
     // Solo sincronizar cuando sea necesario (agregar/editar producto individual)
-    // logManager.info('📤 Subiendo productos...');
-    // try {
-    //   await pushProducts();
-    // } catch (e) {
-    //   logManager.warn('⚠️ Error subiendo productos:', e);
-    // }
+    logManager.info('📤 Subiendo productos...');
+    try {
+      await pushProducts();
+    } catch (e) {
+      logManager.warn('⚠️ Error subiendo productos:', e);
+    }
     
     // logManager.info('📤 Subiendo categorías...');
     // try {

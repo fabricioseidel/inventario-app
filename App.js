@@ -317,11 +317,28 @@ export default function App() {
     }
   }, [refreshInventory]);
 
-  const handleOpenNewProductFromSale = useCallback((barcode) => {
-    setSaleRequestedBarcode(String(barcode));
-    setEditing({ barcode: String(barcode) });
-    setOpenForm(true);
-  }, []);
+  const handleOpenNewProductFromSale = useCallback(async (barcode) => {
+    const code = String(barcode).trim();
+    setSaleRequestedBarcode(code);
+    
+    // Verificar si ya existe para abrir en modo edición
+    try {
+      const existing = await listProducts(0, 1, code);
+      if (existing && existing.length > 0 && existing[0].barcode === code) {
+        // Existe, abrir en modo edición
+        onEdit(existing[0]);
+      } else {
+        // No existe, abrir en modo creación
+        setEditing({ barcode: code });
+        setOpenForm(true);
+      }
+    } catch (e) {
+      console.warn('Error verificando producto existente:', e);
+      // Fallback a modo creación
+      setEditing({ barcode: code });
+      setOpenForm(true);
+    }
+  }, [onEdit]);
 
   const consumeRecentProduct = useCallback(() => {
     setRecentlyCreatedBarcode(null);
