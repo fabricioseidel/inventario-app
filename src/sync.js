@@ -338,7 +338,11 @@ export async function pullProducts({ sinceTs } = {}) {
 
 export async function pullSales({ sinceTs } = {}) {
   const pullStartTime = Date.now();
-  const sinceIso = sinceTs ? new Date(sinceTs).toISOString() : '1970-01-01T00:00:00Z';
+  
+  // 🛡️ SAFETY: Clamp sinceTs to current time to prevent future timestamps (e.g. from bad clock) blocking sync
+  const safeSinceTs = (sinceTs && sinceTs > Date.now()) ? Date.now() : sinceTs;
+  const sinceIso = safeSinceTs ? new Date(safeSinceTs).toISOString() : '1970-01-01T00:00:00Z';
+  
   const deviceId = await getDeviceId();
   
   logManager.info('═══════════════════════════════════════════════════════');
@@ -346,17 +350,18 @@ export async function pullSales({ sinceTs } = {}) {
   logManager.info('═══════════════════════════════════════════════════════');
   logManager.info(`⏰ Timestamp: ${new Date().toISOString()}`);
   logManager.info(`📱 Device ID: ${deviceId}`);
-  logManager.info(`🕐 Desde: ${sinceIso}`);
+  logManager.info(`🕐 Desde: ${sinceIso} (Original: ${sinceTs})`);
 
   logManager.info(`⏳ [PASO 1] Consultando tabla 'sales'...`);
   const queryStartTime = Date.now();
   
   // 1. Obtener ventas nuevas (por timestamp)
+  // 🔧 FIX: Incluir ventas con device_id NULL (ej. web) o diferente al actual
   const { data: newSales, error: errorNew } = await supabase
     .from('sales')
     .select('*')
     .gt('ts', sinceIso)
-    .neq('device_id', deviceId)
+    .or(`device_id.neq.${deviceId},device_id.is.null`)
     .order('ts', { ascending: true })
     .limit(500);
 
