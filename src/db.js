@@ -199,6 +199,31 @@ function migrateSaleTransferProof(tx, done){
   );
 }
 
+function migrateProductExtraFields(tx, done){
+  const cols = [
+    { name: 'description', def: 'TEXT' },
+    { name: 'measurement_unit', def: 'TEXT' },
+    { name: 'measurement_value', def: 'REAL' },
+    { name: 'suggested_price', def: 'REAL' },
+    { name: 'offer_price', def: 'REAL' },
+    { name: 'is_active', def: 'INTEGER DEFAULT 1' },
+    { name: 'supplier_id', def: 'TEXT' }, // Simplificación: 1 proveedor principal localmente
+    { name: 'tax_rate', def: 'REAL DEFAULT 19' } // IVA por defecto 19%
+  ];
+  ensureColumnsInTable(tx, 'products', cols, ()=> done && done());
+}
+
+function migrateSuppliers(tx, done){
+  tx.executeSql(`CREATE TABLE IF NOT EXISTS suppliers(
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    contact_name TEXT,
+    phone TEXT,
+    email TEXT,
+    notes TEXT
+  );`, [], ()=> done && done());
+}
+
 // ---------- INIT ----------
 export function initDB(){
   console.log('🔧 Inicializando base de datos...');
@@ -295,7 +320,9 @@ export function initDB(){
           cb => migrateSaleItemsQty(tx, cb),
           cb => migrateProductImages(tx, cb),
           cb => migrateSaleTransferProof(tx, cb),
-          cb => migrateCashManagement(tx, cb)
+          cb => migrateCashManagement(tx, cb),
+          cb => migrateProductExtraFields(tx, cb), // 🆕 Nuevos campos
+          cb => migrateSuppliers(tx, cb) // 🆕 Proveedores
         ];
         
         if (index >= migrations.length) {
@@ -336,18 +363,29 @@ export function insertOrUpdateProduct(p){
     stock:Number(p.stock ?? 0)||0,
     sold_by_weight:Number(p.sold_by_weight ?? p.soldByWeight ?? 0)||0,
     image_uri:p.imageUri ?? p.image_uri ?? null,
+    description: p.description ?? null,
+    measurement_unit: p.measurement_unit ?? p.measurementUnit ?? null,
+    measurement_value: Number(p.measurement_value ?? p.measurementValue ?? 0) || 0,
+    suggested_price: Number(p.suggested_price ?? p.suggestedPrice ?? 0) || 0,
+    offer_price: Number(p.offer_price ?? p.offerPrice ?? 0) || 0,
+    is_active: p.is_active ?? p.isActive ?? 1,
+    supplier_id: p.supplier_id ?? p.supplierId ?? null,
+    tax_rate: Number(p.tax_rate ?? p.taxRate ?? 19) || 19
   };
   if(!payload.barcode) return Promise.reject(new Error('barcode requerido'));
   return new Promise((resolve,reject)=>{
     db().transaction((tx)=>{
       tx.executeSql(
-        `INSERT INTO products (barcode,name,category,purchase_price,sale_price,expiry_date,stock,sold_by_weight,image_uri,updated_at)
-         VALUES (?,?,?,?,?,?,?,?,?,?)
+        `INSERT INTO products (barcode,name,category,purchase_price,sale_price,expiry_date,stock,sold_by_weight,image_uri,updated_at,description,measurement_unit,measurement_value,suggested_price,offer_price,is_active,supplier_id,tax_rate)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
          ON CONFLICT(barcode) DO UPDATE SET
            name=excluded.name, category=excluded.category,
            purchase_price=excluded.purchase_price, sale_price=excluded.sale_price,
-           expiry_date=excluded.expiry_date, stock=excluded.stock, sold_by_weight=excluded.sold_by_weight, image_uri=excluded.image_uri, updated_at=excluded.updated_at;`,
-        [payload.barcode,payload.name,payload.category,payload.purchase_price,payload.sale_price,payload.expiry_date,payload.stock,payload.sold_by_weight,payload.image_uri,now]
+           expiry_date=excluded.expiry_date, stock=excluded.stock, sold_by_weight=excluded.sold_by_weight, image_uri=excluded.image_uri, updated_at=excluded.updated_at,
+           description=excluded.description, measurement_unit=excluded.measurement_unit, measurement_value=excluded.measurement_value,
+           suggested_price=excluded.suggested_price, offer_price=excluded.offer_price, is_active=excluded.is_active, supplier_id=excluded.supplier_id, tax_rate=excluded.tax_rate;`,
+        [payload.barcode,payload.name,payload.category,payload.purchase_price,payload.sale_price,payload.expiry_date,payload.stock,payload.sold_by_weight,payload.image_uri,now,
+         payload.description, payload.measurement_unit, payload.measurement_value, payload.suggested_price, payload.offer_price, payload.is_active, payload.supplier_id, payload.tax_rate]
       );
     }, reject, ()=>resolve(true));
   });
@@ -359,16 +397,39 @@ export function upsertProductsBulk(list){
     db().transaction((tx)=>{
       (list||[]).forEach(p=>{
         tx.executeSql(
-          `INSERT INTO products (barcode,name,category,purchase_price,sale_price,expiry_date,stock,sold_by_weight,image_uri,updated_at)
-           VALUES (?,?,?,?,?,?,?,?,?,?)
+          `INSERT INTO products (barcode,name,category,purchase_price,sale_price,expiry_date,stock,sold_by_weight,image_uri,updated_at,description,measurement_unit,measurement_value,suggested_price,offer_price,is_active,supplier_id,tax_rate)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
            ON CONFLICT(barcode) DO UPDATE SET
             name=excluded.name, category=excluded.category,
             purchase_price=excluded.purchase_price, sale_price=excluded.sale_price,
-            expiry_date=excluded.expiry_date, stock=excluded.stock, sold_by_weight=excluded.sold_by_weight, image_uri=excluded.image_uri, updated_at=?;`,
-          [p.barcode, p.name, p.category, p.purchase_price||0, p.sale_price||0, p.expiry_date||null, p.stock||0, p.sold_by_weight||0, p.image_uri ?? p.imageUri ?? null, now, now]
+            expiry_date=excluded.expiry_date, stock=excluded.stock, sold_by_weight=excluded.sold_by_weight, image_uri=excluded.image_uri, updated_at=?,
+            description=excluded.description, measurement_unit=excluded.measurement_unit, measurement_value=excluded.measurement_value,
+            suggested_price=excluded.suggested_price, offer_price=excluded.offer_price, is_active=excluded.is_active, supplier_id=excluded.supplier_id, tax_rate=excluded.tax_rate;`,
+          [p.barcode, p.name, p.category, p.purchase_price||0, p.sale_price||0, p.expiry_date||null, p.stock||0, p.sold_by_weight||0, p.image_uri ?? p.imageUri ?? null, now,
+           p.description, p.measurement_unit, p.measurement_value, p.suggested_price, p.offer_price, p.is_active, p.supplier_id, p.tax_rate, now]
         );
       });
     }, reject, ()=>resolve(true));
+  });
+}
+
+export function upsertSuppliersBulk(list){
+  return new Promise((resolve,reject)=>{
+    db().transaction((tx)=>{
+      (list||[]).forEach(s=>{
+        tx.executeSql(
+          `INSERT OR REPLACE INTO suppliers (id, name, contact_name, phone, email, notes)
+           VALUES (?, ?, ?, ?, ?, ?);`,
+          [s.id, s.name, s.contact_name, s.phone, s.email, s.notes]
+        );
+      });
+    }, reject, ()=>resolve(true));
+  });
+}
+
+export function listSuppliers(){
+  return new Promise((resolve,reject)=>{
+    db().transaction((tx)=>{ tx.executeSql(`SELECT * FROM suppliers ORDER BY name ASC;`, [], (_,_r)=>resolve(rowsToArray(_r))); }, reject);
   });
 }
 

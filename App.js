@@ -426,6 +426,7 @@ export default function App() {
               onChangeText={handleSearchChange}
               returnKeyType="search"
               onSubmitEditing={() => Keyboard.dismiss()}
+              blurOnSubmit={false}
             />
             {search.length > 0 && (
               <TouchableOpacity onPress={() => handleSearchChange('')} style={styles.clearBtn}>

@@ -4,7 +4,7 @@ import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   getUnsyncedSales, markSaleSynced,
-  upsertProductsBulk, upsertCategoriesBulk,
+  upsertProductsBulk, upsertCategoriesBulk, upsertSuppliersBulk,
   listLocalProductsUpdatedAfter, listProducts, listCategories,
   insertSaleFromCloud, insertOrUpdateProduct, getLastSaleTs,
   getSaleWithItems, getOutboxByCloudSaleId
@@ -282,6 +282,14 @@ export async function pushProducts() {
       expiry_date: p.expiry_date || null,
       stock: p.stock || 0,
       updated_at: new Date().toISOString(),
+      description: p.description || null,
+      measurement_unit: p.measurement_unit || null,
+      measurement_value: p.measurement_value || 0,
+      suggested_price: p.suggested_price || 0,
+      offer_price: p.offer_price || 0,
+      is_active: p.is_active === 0 ? false : true,
+      // Nota: supplier_id se maneja en tabla intermedia en backend, pero si la tabla products tiene el campo, lo enviamos
+      // Si no, habría que hacer una llamada separada a product_suppliers
     })),
     { onConflict: 'barcode' }
   );
@@ -297,8 +305,14 @@ export async function pushCategories() {
     localCats.map(c => ({ name: c.name })),
     { onConflict: 'name' }
   );
-
   if (error) logManager.warn('push categories error', error);
+}
+
+export async function pullSuppliers() {
+  const { data, error } = await supabase.from('suppliers').select('*').limit(1000);
+  if (!error && data?.length) {
+    await upsertSuppliersBulk(data);
+  }
 }
 
 // ---------- DESCARGA ----------
@@ -318,6 +332,8 @@ export async function pullProducts({ sinceTs } = {}) {
     .select('*')
     .limit(1000);
   if (!ec && cats?.length) await upsertCategoriesBulk(cats);
+  
+  await pullSuppliers();
 }
 
 export async function pullSales({ sinceTs } = {}) {
@@ -357,7 +373,7 @@ export async function pullSales({ sinceTs } = {}) {
     .from('sales')
     .select('*')
     .gt('ts', thirtyDaysAgo)
-    .neq('transfer_receipt_uri', null) // Solo las que tienen comprobante
+    .not('transfer_receipt_uri', 'is', null) // Solo las que tienen comprobante
     .neq('device_id', deviceId)
     .limit(200);
     

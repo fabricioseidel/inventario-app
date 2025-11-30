@@ -4,7 +4,7 @@ import {
   View, Text, StyleSheet, TextInput, ScrollView, TouchableOpacity, KeyboardAvoidingView, Platform, Alert, Modal, Switch
 } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import { insertOrUpdateProduct, listCategories, addCategory, getProductByBarcode } from '../db';
+import { insertOrUpdateProduct, listCategories, addCategory, getProductByBarcode, listSuppliers } from '../db';
 import { theme } from '../ui/Theme';
 
 function Field({ label, children }) {
@@ -25,15 +25,51 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
   const [expiryDate, setExpiryDate] = useState(initial?.expiryDate || '');
   const [stock, setStock] = useState(initial?.stock || '');
   const [soldByWeight, setSoldByWeight] = useState(initial?.sold_by_weight ? true : false);
+  
+  // Nuevos campos
+  const [description, setDescription] = useState(initial?.description || '');
+  const [measurementUnit, setMeasurementUnit] = useState(initial?.measurement_unit || 'un');
+  const [measurementValue, setMeasurementValue] = useState(String(initial?.measurement_value ?? '1'));
+  const [supplierId, setSupplierId] = useState(initial?.supplier_id || null);
+  const [taxRate, setTaxRate] = useState(String(initial?.tax_rate ?? '19'));
+  const [priceWithTax, setPriceWithTax] = useState(''); // Calculado
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   const [cats, setCats] = useState([]);
+  const [suppliers, setSuppliers] = useState([]);
   const [catOpen, setCatOpen] = useState(false);
+  const [supplierOpen, setSupplierOpen] = useState(false);
   const [catSearch, setCatSearch] = useState('');
   const [pickExp, setPickExp] = useState(false);
 
   useEffect(() => {
-    (async () => { try { setCats(await listCategories()); } catch {} })();
+    (async () => { 
+      try { 
+        setCats(await listCategories()); 
+        setSuppliers(await listSuppliers());
+      } catch {} 
+    })();
   }, []);
+
+  // Calcular precio con IVA al cargar o cambiar precio neto
+  useEffect(() => {
+    if (salePrice && taxRate) {
+      const net = Number(salePrice);
+      const rate = Number(taxRate) / 100;
+      const withTax = net * (1 + rate);
+      setPriceWithTax(withTax.toFixed(0));
+    }
+  }, [salePrice, taxRate]);
+
+  const handlePriceWithTaxChange = (val) => {
+    setPriceWithTax(val);
+    if (val && taxRate) {
+      const gross = Number(val);
+      const rate = Number(taxRate) / 100;
+      const net = gross / (1 + rate);
+      setSalePrice(net.toFixed(0));
+    }
+  };
 
   const filteredCats = useMemo(() => {
     const q = (catSearch || '').trim().toLowerCase();
@@ -61,6 +97,12 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
       expiryDate: expiryDate || null,
       stock: Number(stock || 0),
       soldByWeight: soldByWeight ? 1 : 0,
+      description: description.trim(),
+      measurementUnit,
+      measurementValue: Number(measurementValue || 0),
+      supplierId,
+      taxRate: Number(taxRate || 19),
+      isActive: 1
     };
     if (!payload.barcode) return Alert.alert('Falta código', 'El código de barras es obligatorio.');
     if (!payload.salePrice && !payload.purchasePrice) {
@@ -108,6 +150,11 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
                 setExpiryDate(existing.expiry_date || '');
                 setStock(String(existing.stock ?? ''));
                 setSoldByWeight(existing.sold_by_weight ? true : false);
+                setDescription(existing.description || '');
+                setMeasurementUnit(existing.measurement_unit || 'un');
+                setMeasurementValue(String(existing.measurement_value ?? '1'));
+                setSupplierId(existing.supplier_id || null);
+                setTaxRate(String(existing.tax_rate ?? '19'));
             }}
           ]
         );
@@ -127,6 +174,12 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
     }
   };
 
+  const selectedSupplierName = useMemo(() => {
+    if (!supplierId) return '';
+    const s = suppliers.find(x => x.id === supplierId);
+    return s ? s.name : supplierId;
+  }, [supplierId, suppliers]);
+
   return (
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.select({ ios: 'padding', android: undefined })}>
       <ScrollView style={{ flex: 1, paddingHorizontal: 16, paddingTop: 8 }} contentContainerStyle={{ paddingBottom: 90 }}>
@@ -145,26 +198,21 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
           <TextInput style={styles.input} value={name} onChangeText={setName} placeholder="Ej: Coca-Cola 1.5L" />
         </Field>
 
-
         <Field label="Categoría">
           <TouchableOpacity style={styles.select} onPress={() => setCatOpen(true)}>
             <Text style={{ color: category ? theme.colors.text : '#999' }}>{category || 'Elegir o crear…'}</Text>
           </TouchableOpacity>
         </Field>
 
-        <Field label="Se vende por peso">
-          <Switch value={soldByWeight} onValueChange={setSoldByWeight} />
-        </Field>
-
         <View style={{ flexDirection: 'row', gap: 10 }}>
           <View style={{ flex: 1 }}>
-            <Field label="Precio compra">
-              <TextInput style={styles.input} value={String(purchasePrice)} onChangeText={setPurchasePrice} placeholder="0" keyboardType="numeric" />
+            <Field label="Precio Neto (Sin IVA)">
+              <TextInput style={styles.input} value={String(salePrice)} onChangeText={setSalePrice} placeholder="0" keyboardType="numeric" />
             </Field>
           </View>
           <View style={{ flex: 1 }}>
-            <Field label={soldByWeight ? 'Precio por kg' : 'Precio venta'}>
-              <TextInput style={styles.input} value={String(salePrice)} onChangeText={setSalePrice} placeholder="0" keyboardType="numeric" />
+            <Field label={`Precio Venta (IVA ${taxRate}%)`}>
+              <TextInput style={[styles.input, { backgroundColor: '#f9f9f9' }]} value={String(priceWithTax)} onChangeText={handlePriceWithTaxChange} placeholder="0" keyboardType="numeric" />
             </Field>
           </View>
         </View>
@@ -176,13 +224,57 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
             </Field>
           </View>
           <View style={{ flex: 1 }}>
-            <Field label="Fecha de caducidad">
-              <TouchableOpacity style={styles.select} onPress={() => setPickExp(true)}>
-                <Text style={{ color: expiryDate ? theme.colors.text : '#999' }}>{expiryDate || 'Elegir fecha…'}</Text>
-              </TouchableOpacity>
+            <Field label="Precio compra (Neto)">
+              <TextInput style={styles.input} value={String(purchasePrice)} onChangeText={setPurchasePrice} placeholder="0" keyboardType="numeric" />
             </Field>
           </View>
         </View>
+
+        <TouchableOpacity style={styles.advancedToggle} onPress={() => setShowAdvanced(!showAdvanced)}>
+          <Text style={styles.advancedToggleText}>{showAdvanced ? 'Ocultar detalles avanzados ▲' : 'Mostrar detalles avanzados ▼'}</Text>
+        </TouchableOpacity>
+
+        {showAdvanced && (
+          <View style={styles.advancedBox}>
+            <Field label="Descripción">
+              <TextInput style={[styles.input, { height: 60 }]} value={description} onChangeText={setDescription} placeholder="Descripción detallada..." multiline />
+            </Field>
+
+            <Field label="Proveedor">
+              <TouchableOpacity style={styles.select} onPress={() => setSupplierOpen(true)}>
+                <Text style={{ color: supplierId ? theme.colors.text : '#999' }}>{selectedSupplierName || 'Seleccionar proveedor'}</Text>
+              </TouchableOpacity>
+            </Field>
+
+            <View style={{ flexDirection: 'row', gap: 10 }}>
+              <View style={{ flex: 1 }}>
+                <Field label="Unidad Medida">
+                  <TextInput style={styles.input} value={measurementUnit} onChangeText={setMeasurementUnit} placeholder="un, kg, lt..." />
+                </Field>
+              </View>
+              <View style={{ flex: 1 }}>
+                <Field label="Valor Medida">
+                  <TextInput style={styles.input} value={measurementValue} onChangeText={setMeasurementValue} placeholder="1" keyboardType="numeric" />
+                </Field>
+              </View>
+            </View>
+
+            <View style={{ flexDirection: 'row', gap: 10 }}>
+              <View style={{ flex: 1 }}>
+                <Field label="Se vende por peso">
+                  <Switch value={soldByWeight} onValueChange={setSoldByWeight} />
+                </Field>
+              </View>
+              <View style={{ flex: 1 }}>
+                <Field label="Fecha caducidad">
+                  <TouchableOpacity style={styles.select} onPress={() => setPickExp(true)}>
+                    <Text style={{ color: expiryDate ? theme.colors.text : '#999' }}>{expiryDate || 'Elegir...'}</Text>
+                  </TouchableOpacity>
+                </Field>
+              </View>
+            </View>
+          </View>
+        )}
 
         <Text style={{ color: '#888', marginTop: 6 }}>Completa lo necesario. Puedes dejar en blanco los campos que no apliquen.</Text>
       </ScrollView>
@@ -232,6 +324,37 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
         </View>
       </Modal>
 
+      {/* Selector de Proveedor */}
+      <Modal visible={supplierOpen} animationType="slide" onRequestClose={() => setSupplierOpen(false)}>
+        <View style={{ flex: 1, backgroundColor: '#fff' }}>
+          <View style={{ padding: 16, borderBottomWidth: 1, borderColor: theme.colors.divider }}>
+            <Text style={{ fontSize: 18, fontWeight: '700' }}>Proveedores</Text>
+            <Text style={{ color: '#666', marginTop: 2 }}>Selecciona el proveedor principal</Text>
+          </View>
+          <ScrollView contentContainerStyle={{ padding: 16 }}>
+            <TouchableOpacity style={styles.catItem} onPress={() => { setSupplierId(null); setSupplierOpen(false); }}>
+              <Text style={{ fontWeight: '600', color: '#666' }}>Ninguno / Desconocido</Text>
+            </TouchableOpacity>
+            {(suppliers || []).map(s => (
+              <TouchableOpacity key={s.id} style={styles.catItem} onPress={() => { setSupplierId(s.id); setSupplierOpen(false); }}>
+                <Text style={{ fontWeight: '600' }}>{s.name}</Text>
+                {s.contact_name && <Text style={{ fontSize: 12, color: '#666' }}>{s.contact_name}</Text>}
+              </TouchableOpacity>
+            ))}
+            {(!suppliers || suppliers.length === 0) && (
+              <Text style={{ color: '#888', textAlign: 'center', marginTop: 20 }}>
+                No hay proveedores sincronizados. Sincroniza la app para descargarlos.
+              </Text>
+            )}
+          </ScrollView>
+          <View style={{ padding: 16 }}>
+            <TouchableOpacity style={[styles.btn, styles.btnGhost]} onPress={() => setSupplierOpen(false)}>
+              <Text style={[styles.btnText, { color: '#333' }]}>Cerrar</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
     </KeyboardAvoidingView>
   );
 }
@@ -246,12 +369,7 @@ const styles = StyleSheet.create({
   btnGhost: { backgroundColor: '#fff', borderColor: '#e6e6e6' },
   btnText: { fontWeight: '700' },
   catItem: { padding: 12, borderRadius: 10, borderWidth: 1, borderColor: '#eee', marginBottom: 8, backgroundColor: '#fff' },
-
-
-
-
-
-
-
-
+  advancedToggle: { padding: 10, alignItems: 'center', marginVertical: 5 },
+  advancedToggleText: { color: '#007BFF', fontWeight: '600' },
+  advancedBox: { backgroundColor: '#f8f9fa', padding: 12, borderRadius: 12, marginBottom: 12, borderWidth: 1, borderColor: '#eee' },
 });

@@ -62,7 +62,7 @@ export default function SellScreen({
         next[i] = {
           ...next[i],
           qty: Number(next[i].qty || 0) + 1,
-          unit_price: p.sale_price ?? next[i].unit_price,
+          unit_price: (p.sale_price != null) ? (Number(p.sale_price) * (1 + (Number(p.tax_rate || 0) / 100))) : next[i].unit_price,
         };
         return next;
       }
@@ -71,7 +71,7 @@ export default function SellScreen({
         {
           barcode: p.barcode,
           name: p.name || '',
-          unit_price: Number(p.sale_price || 0),
+          unit_price: Number(p.sale_price || 0) * (1 + (Number(p.tax_rate || 0) / 100)),
           qty: 1,
           sold_by_weight: p.sold_by_weight ? 1 : 0,
         },
