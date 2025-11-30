@@ -134,9 +134,22 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
   };
 
   const save = async () => {
+    // Generar nombre final concatenando medida si aplica
+    let finalName = name.trim();
+    if (measurementUnit && measurementUnit !== 'un' && measurementValue) {
+      // Verificar si el nombre ya termina con la medida para no duplicar
+      const suffix = `${measurementValue} ${measurementUnit}`;
+      const suffixNoSpace = `${measurementValue}${measurementUnit}`;
+      
+      if (!finalName.toLowerCase().endsWith(suffix.toLowerCase()) && 
+          !finalName.toLowerCase().endsWith(suffixNoSpace.toLowerCase())) {
+        finalName = `${finalName} ${measurementValue} ${measurementUnit}`;
+      }
+    }
+
     const payload = {
       barcode: String(barcode || '').trim(),
-      name: name.trim(),
+      name: finalName,
       category: category.trim(),
       purchasePrice: Number(purchasePrice || 0),
       salePrice: Number(salePrice || 0),
@@ -200,25 +213,33 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
                 const sPrice = Number(existing.sale_price || 0);
                 
                 setPurchasePrice(String(pPrice));
-                setPurchasePriceTax((pPrice * rate).toFixed(0));
-                setSuggestedPrice(((pPrice * rate) / 0.65).toFixed(0));
-                
                 setSalePrice(String(sPrice));
-                setSalePriceTax((sPrice * rate).toFixed(0));
+                
+                if (pPrice) {
+                  const gross = pPrice * rate;
+                  setPurchasePriceTax(gross.toFixed(0));
+                  setSuggestedPrice((gross / 0.65).toFixed(0));
+                }
+                if (sPrice) {
+                  const gross = sPrice * rate;
+                  setSalePriceTax(gross.toFixed(0));
+                }
 
+                setStock(String(existing.stock || ''));
                 setExpiryDate(existing.expiry_date || '');
-                setStock(String(existing.stock ?? ''));
-                setSoldByWeight(existing.sold_by_weight ? true : false);
+                setSoldByWeight(!!existing.sold_by_weight);
                 setDescription(existing.description || '');
                 setMeasurementUnit(existing.measurement_unit || 'un');
-                setMeasurementValue(String(existing.measurement_value ?? '1'));
+                setMeasurementValue(String(existing.measurement_value || '1'));
                 setSupplierId(existing.supplier_id || null);
-                setTaxRate(String(existing.tax_rate ?? '19'));
+                setTaxRate(String(existing.tax_rate || '19'));
             }}
           ]
         );
       }
-    } catch (e) {}
+    } catch (e) {
+      console.warn('Error checking barcode:', e);
+    }
   };
 
   const addCat = async () => {
@@ -243,19 +264,27 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.select({ ios: 'padding', android: undefined })}>
       <ScrollView style={{ flex: 1, paddingHorizontal: 16, paddingTop: 8 }} contentContainerStyle={{ paddingBottom: 90 }}>
         <Field label="Código de barras">
-          <TextInput 
-            style={styles.input} 
-            value={barcode} 
-            onChangeText={setBarcode} 
-            placeholder="Ej: 7800000000001" 
-            keyboardType="numeric" 
-            autoFocus={true}
-            blurOnSubmit={false}
-            onSubmitEditing={() => {
-               checkExistingBarcode();
-               nameRef.current?.focus();
-            }}
-          />
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            <TextInput 
+              style={[styles.input, { flex: 1 }]} 
+              value={barcode} 
+              onChangeText={setBarcode} 
+              placeholder="Ej: 7800000000001" 
+              keyboardType="numeric" 
+              autoFocus={true}
+              blurOnSubmit={false}
+              onSubmitEditing={() => {
+                 checkExistingBarcode();
+                 nameRef.current?.focus();
+              }}
+            />
+            <TouchableOpacity 
+              style={{ justifyContent: 'center', alignItems: 'center', backgroundColor: '#eee', borderRadius: 12, paddingHorizontal: 12 }}
+              onPress={() => Alert.alert('Info', 'Usa el escáner físico o la cámara (si está disponible) para llenar este campo.')}
+            >
+              <Text style={{ fontSize: 20 }}>📷</Text>
+            </TouchableOpacity>
+          </View>
         </Field>
 
         <Field label="Nombre">

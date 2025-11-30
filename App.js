@@ -432,8 +432,17 @@ export default function App() {
               value={search}
               onChangeText={handleSearchChange}
               returnKeyType="search"
-              onSubmitEditing={() => Keyboard.dismiss()}
+              onSubmitEditing={() => {
+                // Si es un código de barras (solo números y longitud > 3), intentar abrir formulario
+                if (/^\d{3,}$/.test(search)) {
+                  handleOpenNewProductFromSale(search);
+                  setSearch(''); // Limpiar búsqueda
+                } else {
+                  Keyboard.dismiss();
+                }
+              }}
               blurOnSubmit={false}
+              autoFocus={true} // 🆕 Autofocus para capturar scanner
             />
             {search.length > 0 && (
               <TouchableOpacity onPress={() => handleSearchChange('')} style={styles.clearBtn}>
@@ -500,6 +509,8 @@ export default function App() {
               { icon: '➕', label: 'Nuevo', onPress: onCreate },
             ]}
           />
+          
+          {/* Input oculto para capturar scanner si el foco se pierde del search (opcional, pero search con autofocus suele bastar) */}
         </View>
       )}
 

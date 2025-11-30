@@ -1,9 +1,98 @@
 // src/db.js
 import * as SQLite from 'expo-sqlite';
+import { logManager } from './utils/LogViewer';
 
 let _db = null;
 function db(){ if(!_db) _db = SQLite.openDatabase('olivomarket.db'); return _db; }
 function rowsToArray(res){ const a=[]; for(let i=0;i<res.rows.length;i++) a.push(res.rows.item(i)); return a; }
+
+// Wrapper para logging
+const originalTransaction = SQLite.SQLiteDatabase.prototype.transaction;
+// No podemos sobrescribir transaction directamente en el prototipo de forma segura si es un objeto nativo,
+// pero podemos interceptar nuestras llamadas a db().transaction si envolvemos db() o usamos una función helper.
+// Sin embargo, para ser menos intrusivos, vamos a modificar nuestra función db() o crear un helper executeSqlLogged.
+
+function executeSqlLogged(tx, sql, params = [], success, error) {
+  const start = Date.now();
+  // logManager.debug(`[SQL START] ${sql.substring(0, 100)}...`, params);
+  
+  tx.executeSql(
+    sql,
+    params,
+    (t, r) => {
+      const duration = Date.now() - start;
+      if (duration > 100) { // Log slow queries
+        logManager.warn(`[SQL SLOW ${duration}ms] ${sql}`, params);
+      } else {
+        // logManager.debug(`[SQL OK ${duration}ms]`);
+      }
+      if (success) success(t, r);
+    },
+    (t, e) => {
+      const duration = Date.now() - start;
+      logManager.error(`[SQL ERROR ${duration}ms] ${sql} - ${e.message}`, params);
+      if (error) return error(t, e);
+      return false; // Propagate error by default if no handler
+    }
+  );
+}
+
+// Monkey patch transaction to use logged executeSql? 
+// Mejor, vamos a interceptar db().transaction en nuestra app.
+// Pero como db() devuelve la instancia directa, vamos a hacer un wrapper simple.
+
+const dbInstance = () => {
+  const database = db();
+  return {
+    transaction: (callback, error, success) => {
+      database.transaction((tx) => {
+        const originalExecuteSql = tx.executeSql;
+        tx.executeSql = (sql, params, s, e) => {
+           executeSqlLogged({ executeSql: originalExecuteSql }, sql, params, s, e);
+        };
+        callback(tx);
+      }, error, success);
+    },
+    exec: database.exec.bind(database)
+  };
+};
+
+// Reemplazamos la función db() interna por nuestro wrapper
+// Ojo: esto afecta a todo el archivo db.js
+const _originalDb = db;
+function dbLogged() {
+   // Retornamos un objeto que imita la interfaz de transaction pero inyecta el logger
+   const d = _originalDb();
+   return {
+     transaction: (cb, err, ok) => {
+       d.transaction(tx => {
+         const realExecute = tx.executeSql.bind(tx);
+         tx.executeSql = (sql, args, s, e) => {
+            const start = Date.now();
+            realExecute(sql, args, 
+              (tx2, res) => {
+                const time = Date.now() - start;
+                logManager.debug(`[SQL] ${time}ms - ${sql.substring(0,150)}`, args);
+                if(s) s(tx2, res);
+              },
+              (tx2, errorObj) => {
+                const time = Date.now() - start;
+                logManager.error(`[SQL ERROR] ${time}ms - ${sql} - ${errorObj?.message}`, args);
+                if(e) return e(tx2, errorObj);
+                return true; // Default error handling
+              }
+            );
+         };
+         cb(tx);
+       }, err, ok);
+     },
+     exec: d.exec.bind(d)
+   };
+}
+
+// Sobrescribimos la función db localmente para que todo use el logger
+// eslint-disable-next-line no-func-assign
+db = dbLogged;
 
 // ---------- MIGRACIONES ----------
 function ensureColumnsInTable(tx, table, columnDefs, done){
