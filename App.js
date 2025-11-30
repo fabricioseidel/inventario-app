@@ -347,6 +347,11 @@ export default function App() {
 
   // Importante: Definimos todos los hooks primero
   const renderProduct = useCallback(({ item }) => {
+    // Calcular precio venta con IVA para mostrar
+    const taxRate = Number(item.tax_rate || 19);
+    const netPrice = Number(item.sale_price || 0);
+    const grossPrice = Math.round(netPrice * (1 + taxRate / 100));
+
     return (
       <View style={[styles.card, isCompact && styles.cardCompact]}>
         {item.image_uri ? (
@@ -360,7 +365,7 @@ export default function App() {
           <Text style={styles.cardTitle}>{item.name || '(Sin nombre)'}</Text>
           <Text style={styles.cardLine}>{item.category || 'Sin categoría'}</Text>
           <Text style={styles.cardLine}>Código: {item.barcode}</Text>
-          <Text style={styles.cardLine}>Compra: ${item.purchase_price ?? 0} · Venta: ${item.sale_price ?? 0}</Text>
+          <Text style={styles.cardLine}>Compra: ${item.purchase_price ?? 0} · Venta: ${grossPrice}</Text>
           <Text style={styles.cardLine}>Vence: {item.expiry_date || '—'} · Stock: {item.stock ?? 0}</Text>
         </View>
         <View style={[styles.cardActions, isCompact && styles.cardActionsCompact]}>
