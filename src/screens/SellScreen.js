@@ -62,7 +62,7 @@ export default function SellScreen({
         next[i] = {
           ...next[i],
           qty: Number(next[i].qty || 0) + 1,
-          unit_price: (p.sale_price != null) ? (Number(p.sale_price) * (1 + (Number(p.tax_rate || 0) / 100))) : next[i].unit_price,
+          unit_price: (p.sale_price != null) ? Number(p.sale_price) : next[i].unit_price,
         };
         return next;
       }
@@ -71,7 +71,7 @@ export default function SellScreen({
         {
           barcode: p.barcode,
           name: p.name || '',
-          unit_price: Number(p.sale_price || 0) * (1 + (Number(p.tax_rate || 0) / 100)),
+          unit_price: Number(p.sale_price || 0),
           qty: 1,
           sold_by_weight: p.sold_by_weight ? 1 : 0,
         },
@@ -294,26 +294,26 @@ export default function SellScreen({
           console.log(`Comprobante detectado: Sí`);
           console.log(`Tipo: ${proof.kind}`);
           console.log(`Nombre: ${proof.name}`);
-          
+
           // Generar un ID temporal para el nombre del archivo
           const tempSaleId = `temp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
           console.log(`⏳ [PASO 1] Subiendo comprobante a Supabase...`);
           console.log(`   ID temporal: ${tempSaleId}`);
-          
+
           receiptUrl = await uploadReceiptToSupabase(proof.uri, tempSaleId);
-          
+
           console.log(`⏳ [DEBUG] Valor retornado de uploadReceiptToSupabase:`);
           console.log(`   Type: ${typeof receiptUrl}`);
           console.log(`   Value: ${receiptUrl}`);
           console.log(`   Length: ${receiptUrl ? receiptUrl.length : 'null'}`);
-          
+
           receiptName = proof.name;
-          
+
           if (!receiptUrl) {
             console.warn(`⚠️ [ADVERTENCIA] uploadReceiptToSupabase retornó un valor vacío`);
             throw new Error('uploadReceiptToSupabase retornó null o undefined');
           }
-          
+
           console.log(`✅ [PASO 2] Comprobante subido exitosamente`);
           console.log(`   URL: ${receiptUrl}`);
           console.log(`═══════════════════════════════════════════════════════`);
@@ -324,13 +324,13 @@ export default function SellScreen({
           console.error(`Error: ${uploadError.message}`);
           console.error(`Stack: ${uploadError.stack}`);
           console.error(`Sale ID temporal: temp-${Date.now()}`);
-          
+
           // 🆕 OFFLINE SUPPORT: Si falla la subida (ej. sin internet), guardamos la URI local
           // El proceso de sync (pushSales) se encargará de subirla cuando haya conexión
           console.log('⚠️ [OFFLINE SUPPORT] Falló subida, guardando URI local para sincronización posterior');
           receiptUrl = proof.uri;
           receiptName = proof.name;
-          
+
           // Alert.alert('Aviso', 'No hay conexión para subir el comprobante. Se guardará localmente y se subirá cuando recuperes la conexión.');
         }
       }
@@ -348,10 +348,10 @@ export default function SellScreen({
         hasReceipt: !!receiptUrl,
         receiptUrl: receiptUrl ? '✅ Presente' : '❌ Ausente',
       });
-      
+
       await recordSale(cart, payload);
       console.log(`✅ Venta registrada en local correctamente`);
-      
+
       // Sincronizar automáticamente si hay comprobante o se especifique
       if (receiptUrl) {
         console.log('⏳ [PASO 4] Sincronizando venta con comprobante a Supabase...');
@@ -363,7 +363,7 @@ export default function SellScreen({
           // No lanzamos error, la sincronización fallida no debería detener el flujo
         }
       }
-      
+
       Alert.alert(
         'Venta registrada',
         `Total: $${total.toFixed(0)}${method === 'efectivo' ? `\nVuelto: $${change.toFixed(0)}` : ''}`

@@ -3,96 +3,96 @@ import * as SQLite from 'expo-sqlite';
 import { logManager } from './utils/LogViewer';
 
 let _db = null;
-function getRawDb(){ if(!_db) _db = SQLite.openDatabase('olivomarket.db'); return _db; }
+function getRawDb() { if (!_db) _db = SQLite.openDatabase('olivomarket.db'); return _db; }
 
 function db() {
-   const d = getRawDb();
-   return {
-     transaction: (cb, err, ok) => {
-       d.transaction(tx => {
-         const realExecute = tx.executeSql.bind(tx);
-         tx.executeSql = (sql, args, s, e) => {
-            const start = Date.now();
-            realExecute(sql, args, 
-              (tx2, res) => {
-                const time = Date.now() - start;
-                if (time > 200) {
-                   logManager.warn(`[SQL SLOW ${time}ms] ${sql.substring(0,150)}`, args);
-                }
-                if(s) s(tx2, res);
-              },
-              (tx2, errorObj) => {
-                const time = Date.now() - start;
-                logManager.error(`[SQL ERROR ${time}ms] ${sql} - ${errorObj?.message}`, args);
-                if(e) return e(tx2, errorObj);
-                return true; 
+  const d = getRawDb();
+  return {
+    transaction: (cb, err, ok) => {
+      d.transaction(tx => {
+        const realExecute = tx.executeSql.bind(tx);
+        tx.executeSql = (sql, args, s, e) => {
+          const start = Date.now();
+          realExecute(sql, args,
+            (tx2, res) => {
+              const time = Date.now() - start;
+              if (time > 200) {
+                logManager.warn(`[SQL SLOW ${time}ms] ${sql.substring(0, 150)}`, args);
               }
-            );
-         };
-         cb(tx);
-       }, err, ok);
-     },
-     exec: (queries, readOnly, cb) => {
-        if (d.exec) return d.exec(queries, readOnly, cb);
-        if (cb) cb(null, []);
-     }
-   };
+              if (s) s(tx2, res);
+            },
+            (tx2, errorObj) => {
+              const time = Date.now() - start;
+              logManager.error(`[SQL ERROR ${time}ms] ${sql} - ${errorObj?.message}`, args);
+              if (e) return e(tx2, errorObj);
+              return true;
+            }
+          );
+        };
+        cb(tx);
+      }, err, ok);
+    },
+    exec: (queries, readOnly, cb) => {
+      if (d.exec) return d.exec(queries, readOnly, cb);
+      if (cb) cb(null, []);
+    }
+  };
 }
 
-function rowsToArray(res){ const a=[]; for(let i=0;i<res.rows.length;i++) a.push(res.rows.item(i)); return a; }
+function rowsToArray(res) { const a = []; for (let i = 0; i < res.rows.length; i++) a.push(res.rows.item(i)); return a; }
 
 // ---------- MIGRACIONES ----------
-function ensureColumnsInTable(tx, table, columnDefs, done){
+function ensureColumnsInTable(tx, table, columnDefs, done) {
   tx.executeSql(
     `SELECT name FROM sqlite_master WHERE type='table' AND name=?;`,
     [table],
-    (_,_tableRes)=>{
-      if(!_tableRes.rows.length){
+    (_, _tableRes) => {
+      if (!_tableRes.rows.length) {
         done && done();
         return;
       }
 
-      tx.executeSql(`PRAGMA table_info(${table});`, [], (_,_res)=>{
+      tx.executeSql(`PRAGMA table_info(${table});`, [], (_, _res) => {
         const existing = new Set();
-        for(let i=0;i<_res.rows.length;i++) existing.add(_res.rows.item(i).name);
+        for (let i = 0; i < _res.rows.length; i++) existing.add(_res.rows.item(i).name);
 
-        const toAdd = columnDefs.filter(c=>!existing.has(c.name));
-        const run=(i)=>{
-          if(i>=toAdd.length){
+        const toAdd = columnDefs.filter(c => !existing.has(c.name));
+        const run = (i) => {
+          if (i >= toAdd.length) {
             done && done();
             return;
           }
-          const c=toAdd[i];
+          const c = toAdd[i];
           tx.executeSql(
             `ALTER TABLE ${table} ADD COLUMN ${c.name} ${c.def};`,
             [],
-            ()=>run(i+1),
-            (_,_err)=>{ console.warn(`⚠️ No se pudo agregar columna ${c.name} en ${table}:`, _err?.message); run(i+1); return true; }
+            () => run(i + 1),
+            (_, _err) => { console.warn(`⚠️ No se pudo agregar columna ${c.name} en ${table}:`, _err?.message); run(i + 1); return true; }
           );
         };
         run(0);
-      }, ()=>{ done&&done(); return true; });
+      }, () => { done && done(); return true; });
     },
-    ()=>{ done&&done(); return true; }
+    () => { done && done(); return true; }
   );
 }
 
-function migrateSalesSchema(tx, done){
+function migrateSalesSchema(tx, done) {
   const cols = [
-    { name:'payment_method', def:'TEXT' },
-    { name:'cash_received',  def:'REAL' },
-    { name:'change_given',   def:'REAL' },
-    { name:'discount',       def:'REAL DEFAULT 0' },
-    { name:'tax',            def:'REAL DEFAULT 0' },
-    { name:'notes',          def:'TEXT' },
-    { name:'voided',         def:'INTEGER DEFAULT 0' },
-    { name:'is_synced',      def:'INTEGER DEFAULT 0' },
-    { name:'cloud_id',       def:'TEXT' },
+    { name: 'payment_method', def: 'TEXT' },
+    { name: 'cash_received', def: 'REAL' },
+    { name: 'change_given', def: 'REAL' },
+    { name: 'discount', def: 'REAL DEFAULT 0' },
+    { name: 'tax', def: 'REAL DEFAULT 0' },
+    { name: 'notes', def: 'TEXT' },
+    { name: 'voided', def: 'INTEGER DEFAULT 0' },
+    { name: 'is_synced', def: 'INTEGER DEFAULT 0' },
+    { name: 'cloud_id', def: 'TEXT' },
   ];
-  ensureColumnsInTable(tx, 'sales', cols, ()=> ensureColumnsInTable(tx, 'sale', cols, ()=> done&&done()));
+  ensureColumnsInTable(tx, 'sales', cols, () => ensureColumnsInTable(tx, 'sale', cols, () => done && done()));
 }
 
-function migrateCashManagement(tx, done){
+function migrateCashManagement(tx, done) {
   // Crear tablas de manejo de caja
   tx.executeSql(`
     CREATE TABLE IF NOT EXISTS cash_sessions (
@@ -108,8 +108,8 @@ function migrateCashManagement(tx, done){
       notes TEXT,
       status TEXT DEFAULT 'open'
     );
-  `, [], 
-  () => tx.executeSql(`
+  `, [],
+    () => tx.executeSql(`
     CREATE TABLE IF NOT EXISTS safe_movements (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       type TEXT NOT NULL,
@@ -121,7 +121,7 @@ function migrateCashManagement(tx, done){
       FOREIGN KEY (session_id) REFERENCES cash_sessions(id)
     );
   `, [],
-  () => tx.executeSql(`
+      () => tx.executeSql(`
     CREATE TABLE IF NOT EXISTS cash_count_details (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       session_id INTEGER NOT NULL,
@@ -134,7 +134,7 @@ function migrateCashManagement(tx, done){
   `, [], () => done && done())));
 }
 
-function migrateCloudOutbox(tx, done){
+function migrateCloudOutbox(tx, done) {
   tx.executeSql(`CREATE TABLE IF NOT EXISTS outbox_sales(
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     local_sale_id INTEGER NOT NULL,
@@ -149,17 +149,17 @@ function migrateCloudOutbox(tx, done){
   done && done();
 }
 
-function migrateProductsWeight(tx, done){
-  tx.executeSql(`PRAGMA table_info(products);`, [], (_,_r)=>{
-    let hasSold= false; let stockType='REAL'; let hasUpdatedAt=false;
-    for(let i=0;i<_r.rows.length;i++){
-      const col=_r.rows.item(i);
-      if(col.name==='sold_by_weight') hasSold=true;
-      if(col.name==='stock') stockType=col.type||'REAL';
-      if(col.name==='updated_at') hasUpdatedAt=true;
+function migrateProductsWeight(tx, done) {
+  tx.executeSql(`PRAGMA table_info(products);`, [], (_, _r) => {
+    let hasSold = false; let stockType = 'REAL'; let hasUpdatedAt = false;
+    for (let i = 0; i < _r.rows.length; i++) {
+      const col = _r.rows.item(i);
+      if (col.name === 'sold_by_weight') hasSold = true;
+      if (col.name === 'stock') stockType = col.type || 'REAL';
+      if (col.name === 'updated_at') hasUpdatedAt = true;
     }
     const recreate = String(stockType).toUpperCase() !== 'REAL';
-    if(recreate){
+    if (recreate) {
       tx.executeSql(`ALTER TABLE products RENAME TO _products_tmp;`);
       tx.executeSql(`CREATE TABLE IF NOT EXISTS products(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -180,30 +180,30 @@ function migrateProductsWeight(tx, done){
       const insertParams = hasUpdatedAt ? [] : [Date.now()];
       tx.executeSql(insertSql, insertParams);
       tx.executeSql(`DROP TABLE _products_tmp;`);
-      done&&done();
-    } else if(!hasSold){
-      tx.executeSql(`ALTER TABLE products ADD COLUMN sold_by_weight INTEGER DEFAULT 0;`, [], ()=>done&&done(), ()=>{ done&&done(); return true; });
+      done && done();
+    } else if (!hasSold) {
+      tx.executeSql(`ALTER TABLE products ADD COLUMN sold_by_weight INTEGER DEFAULT 0;`, [], () => done && done(), () => { done && done(); return true; });
     } else {
-      done&&done();
+      done && done();
     }
-  }, ()=>{ done&&done(); return true; });
+  }, () => { done && done(); return true; });
 }
 
-function migrateProductImages(tx, done){
+function migrateProductImages(tx, done) {
   const cols = [
     { name: 'image_uri', def: 'TEXT' },
   ];
-  ensureColumnsInTable(tx, 'products', cols, ()=> done && done());
+  ensureColumnsInTable(tx, 'products', cols, () => done && done());
 }
 
-function migrateSaleItemsQty(tx, done){
-  tx.executeSql(`PRAGMA table_info(sale_items);`, [], (_,_r)=>{
-    let qtyType='REAL';
-    for(let i=0;i<_r.rows.length;i++){
-      const col=_r.rows.item(i);
-      if(col.name==='qty') qtyType=col.type||'REAL';
+function migrateSaleItemsQty(tx, done) {
+  tx.executeSql(`PRAGMA table_info(sale_items);`, [], (_, _r) => {
+    let qtyType = 'REAL';
+    for (let i = 0; i < _r.rows.length; i++) {
+      const col = _r.rows.item(i);
+      if (col.name === 'qty') qtyType = col.type || 'REAL';
     }
-    if(String(qtyType).toUpperCase() !== 'REAL'){
+    if (String(qtyType).toUpperCase() !== 'REAL') {
       tx.executeSql(`ALTER TABLE sale_items RENAME TO _sale_items_tmp;`);
       tx.executeSql(`CREATE TABLE IF NOT EXISTS sale_items(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -218,24 +218,24 @@ function migrateSaleItemsQty(tx, done){
       tx.executeSql(`INSERT INTO sale_items(id,sale_id,barcode,name,qty,unit_price,subtotal)
                      SELECT id,sale_id,barcode,name,qty,unit_price,subtotal FROM _sale_items_tmp;`);
       tx.executeSql(`DROP TABLE _sale_items_tmp;`);
-      done&&done();
+      done && done();
     } else {
-      done&&done();
+      done && done();
     }
-  }, ()=>{ done&&done(); return true; });
+  }, () => { done && done(); return true; });
 }
 
-function migrateSaleTransferProof(tx, done){
+function migrateSaleTransferProof(tx, done) {
   const cols = [
     { name: 'transfer_receipt_uri', def: 'TEXT' },
     { name: 'transfer_receipt_name', def: 'TEXT' },
   ];
-  ensureColumnsInTable(tx, 'sales', cols, ()=>
-    ensureColumnsInTable(tx, 'sale', cols, ()=> done && done())
+  ensureColumnsInTable(tx, 'sales', cols, () =>
+    ensureColumnsInTable(tx, 'sale', cols, () => done && done())
   );
 }
 
-function migrateProductExtraFields(tx, done){
+function migrateProductExtraFields(tx, done) {
   const cols = [
     { name: 'description', def: 'TEXT' },
     { name: 'measurement_unit', def: 'TEXT' },
@@ -246,10 +246,10 @@ function migrateProductExtraFields(tx, done){
     { name: 'supplier_id', def: 'TEXT' }, // Simplificación: 1 proveedor principal localmente
     { name: 'tax_rate', def: 'REAL DEFAULT 19' } // IVA por defecto 19%
   ];
-  ensureColumnsInTable(tx, 'products', cols, ()=> done && done());
+  ensureColumnsInTable(tx, 'products', cols, () => done && done());
 }
 
-function migrateSuppliers(tx, done){
+function migrateSuppliers(tx, done) {
   tx.executeSql(`CREATE TABLE IF NOT EXISTS suppliers(
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
@@ -257,23 +257,63 @@ function migrateSuppliers(tx, done){
     phone TEXT,
     email TEXT,
     notes TEXT
-  );`, [], ()=> done && done());
+  );`, [], () => done && done());
+}
+
+function migratePricesToGross(tx, done) {
+  // 1. Crear tabla de control de migraciones si no existe
+  tx.executeSql(`CREATE TABLE IF NOT EXISTS migrations_log(
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT UNIQUE NOT NULL,
+    executed_at INTEGER NOT NULL
+  );`, [], () => {
+    // 2. Verificar si ya se corrió esta migración
+    tx.executeSql(`SELECT name FROM migrations_log WHERE name = ?;`, ['migrate_prices_gross_v1'], (_, _r) => {
+      if (_r.rows.length > 0) {
+        // Ya se ejecutó, saltar
+        done && done();
+      } else {
+        // 3. Ejecutar la actualización de precios
+        console.log('🔄 Ejecutando migración de precios a BRUTO (con IVA)...');
+        tx.executeSql(
+          `UPDATE products 
+           SET sale_price = ROUND(sale_price * (1 + (IFNULL(tax_rate, 19) / 100.0))) 
+           WHERE sale_price > 0;`,
+          [],
+          () => {
+            // 4. Registrar que se hizo
+            tx.executeSql(`INSERT INTO migrations_log (name, executed_at) VALUES (?, ?);`, ['migrate_prices_gross_v1', Date.now()],
+              () => {
+                console.log('✅ Precios actualizados a valor final (con IVA).');
+                done && done();
+              },
+              (_, err) => { console.warn('Error registrando migración:', err); done && done(); }
+            );
+          },
+          (_, err) => {
+            console.error('❌ Error actualizando precios:', err);
+            done && done(); // Continuar aunque falle para no bloquear app, pero loguear error
+          }
+        );
+      }
+    }, (_, err) => { console.warn('Error verificando migraciones:', err); done && done(); });
+  });
 }
 
 // ---------- INIT ----------
-export function initDB(){
+export function initDB() {
   console.log('🔧 Inicializando base de datos...');
-  return new Promise((resolve,reject)=>{
+  return new Promise((resolve, reject) => {
     // Primero optimizar la base de datos para mejor rendimiento
     try {
-      db().exec([{ sql: "PRAGMA journal_mode = WAL;", args: [] }], false, () => {});
-      db().exec([{ sql: "PRAGMA synchronous = NORMAL;", args: [] }], false, () => {});
-      db().exec([{ sql: "PRAGMA foreign_keys = ON;", args: [] }], false, () => {});
+      db().exec([{ sql: "PRAGMA journal_mode = WAL;", args: [] }], false, () => { });
+      db().exec([{ sql: "PRAGMA synchronous = NORMAL;", args: [] }], false, () => { });
+      db().exec([{ sql: "PRAGMA foreign_keys = ON;", args: [] }], false, () => { });
     } catch (e) {
       console.warn('PRAGMA setup falló (no crítico):', e);
     }
 
-    db().transaction((tx)=>{
+    db().transaction((tx) => {
       tx.executeSql(`PRAGMA foreign_keys = ON;`);
 
       // products & categories
@@ -294,7 +334,7 @@ export function initDB(){
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT UNIQUE NOT NULL
       );`);
-      ['Bebidas','Abarrotes','Panes','Postres','Quesos','Cecinas','Helados','Hielo','Mascotas','Aseo'].forEach(cat=>{
+      ['Bebidas', 'Abarrotes', 'Panes', 'Postres', 'Quesos', 'Cecinas', 'Helados', 'Hielo', 'Mascotas', 'Aseo'].forEach(cat => {
         tx.executeSql(`INSERT OR IGNORE INTO categories(name) VALUES (?);`, [cat]);
       });
 
@@ -358,18 +398,20 @@ export function initDB(){
           cb => migrateSaleTransferProof(tx, cb),
           cb => migrateCashManagement(tx, cb),
           cb => migrateProductExtraFields(tx, cb), // 🆕 Nuevos campos
-          cb => migrateSuppliers(tx, cb) // 🆕 Proveedores
+          cb => migrateProductExtraFields(tx, cb), // 🆕 Nuevos campos
+          cb => migrateSuppliers(tx, cb), // 🆕 Proveedores
+          cb => migratePricesToGross(tx, cb) // 🆕 Precios a Bruto
         ];
-        
+
         if (index >= migrations.length) {
           console.log('✅ Todas las migraciones completadas exitosamente');
           doneCb();
           return;
         }
-        
+
         try {
           console.log(`🔄 Ejecutando migración ${index + 1}/${migrations.length}...`);
-          migrations[index](function() {
+          migrations[index](function () {
             // Ejecutar la siguiente migración inmediatamente para mantenernos dentro de la misma transacción.
             runMigrations(index + 1, doneCb);
           });
@@ -383,22 +425,22 @@ export function initDB(){
       runMigrations(0, () => {
         console.log('📋 Migraciones completadas');
       });
-    }, reject, ()=>resolve(true));
+    }, reject, () => resolve(true));
   });
 }
 
 // ---------- PRODUCTS ----------
-export function insertOrUpdateProduct(p){
-  const now=Date.now();
+export function insertOrUpdateProduct(p) {
+  const now = Date.now();
   const payload = {
-    barcode:String(p.barcode||'').trim(),
-    name:p.name??null, category:p.category??null,
-    purchase_price:Number(p.purchasePrice ?? p.purchase_price ?? 0)||0,
-    sale_price:Number(p.salePrice ?? p.sale_price ?? 0)||0,
-    expiry_date:p.expiryDate ?? p.expiry_date ?? null,
-    stock:Number(p.stock ?? 0)||0,
-    sold_by_weight:Number(p.sold_by_weight ?? p.soldByWeight ?? 0)||0,
-    image_uri:p.imageUri ?? p.image_uri ?? null,
+    barcode: String(p.barcode || '').trim(),
+    name: p.name ?? null, category: p.category ?? null,
+    purchase_price: Number(p.purchasePrice ?? p.purchase_price ?? 0) || 0,
+    sale_price: Number(p.salePrice ?? p.sale_price ?? 0) || 0,
+    expiry_date: p.expiryDate ?? p.expiry_date ?? null,
+    stock: Number(p.stock ?? 0) || 0,
+    sold_by_weight: Number(p.sold_by_weight ?? p.soldByWeight ?? 0) || 0,
+    image_uri: p.imageUri ?? p.image_uri ?? null,
     description: p.description ?? null,
     measurement_unit: p.measurement_unit ?? p.measurementUnit ?? null,
     measurement_value: Number(p.measurement_value ?? p.measurementValue ?? 0) || 0,
@@ -408,9 +450,9 @@ export function insertOrUpdateProduct(p){
     supplier_id: p.supplier_id ?? p.supplierId ?? null,
     tax_rate: Number(p.tax_rate ?? p.taxRate ?? 19) || 19
   };
-  if(!payload.barcode) return Promise.reject(new Error('barcode requerido'));
-  return new Promise((resolve,reject)=>{
-    db().transaction((tx)=>{
+  if (!payload.barcode) return Promise.reject(new Error('barcode requerido'));
+  return new Promise((resolve, reject) => {
+    db().transaction((tx) => {
       tx.executeSql(
         `INSERT INTO products (barcode,name,category,purchase_price,sale_price,expiry_date,stock,sold_by_weight,image_uri,updated_at,description,measurement_unit,measurement_value,suggested_price,offer_price,is_active,supplier_id,tax_rate)
          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
@@ -420,18 +462,18 @@ export function insertOrUpdateProduct(p){
            expiry_date=excluded.expiry_date, stock=excluded.stock, sold_by_weight=excluded.sold_by_weight, image_uri=excluded.image_uri, updated_at=excluded.updated_at,
            description=excluded.description, measurement_unit=excluded.measurement_unit, measurement_value=excluded.measurement_value,
            suggested_price=excluded.suggested_price, offer_price=excluded.offer_price, is_active=excluded.is_active, supplier_id=excluded.supplier_id, tax_rate=excluded.tax_rate;`,
-        [payload.barcode,payload.name,payload.category,payload.purchase_price,payload.sale_price,payload.expiry_date,payload.stock,payload.sold_by_weight,payload.image_uri,now,
-         payload.description, payload.measurement_unit, payload.measurement_value, payload.suggested_price, payload.offer_price, payload.is_active, payload.supplier_id, payload.tax_rate]
+        [payload.barcode, payload.name, payload.category, payload.purchase_price, payload.sale_price, payload.expiry_date, payload.stock, payload.sold_by_weight, payload.image_uri, now,
+        payload.description, payload.measurement_unit, payload.measurement_value, payload.suggested_price, payload.offer_price, payload.is_active, payload.supplier_id, payload.tax_rate]
       );
-    }, reject, ()=>resolve(true));
+    }, reject, () => resolve(true));
   });
 }
 
-export function upsertProductsBulk(list){
+export function upsertProductsBulk(list) {
   const now = Date.now();
-  return new Promise((resolve,reject)=>{
-    db().transaction((tx)=>{
-      (list||[]).forEach(p=>{
+  return new Promise((resolve, reject) => {
+    db().transaction((tx) => {
+      (list || []).forEach(p => {
         tx.executeSql(
           `INSERT INTO products (barcode,name,category,purchase_price,sale_price,expiry_date,stock,sold_by_weight,image_uri,updated_at,description,measurement_unit,measurement_value,suggested_price,offer_price,is_active,supplier_id,tax_rate)
            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
@@ -441,100 +483,100 @@ export function upsertProductsBulk(list){
             expiry_date=excluded.expiry_date, stock=excluded.stock, sold_by_weight=excluded.sold_by_weight, image_uri=excluded.image_uri, updated_at=?,
             description=excluded.description, measurement_unit=excluded.measurement_unit, measurement_value=excluded.measurement_value,
             suggested_price=excluded.suggested_price, offer_price=excluded.offer_price, is_active=excluded.is_active, supplier_id=excluded.supplier_id, tax_rate=excluded.tax_rate;`,
-          [p.barcode, p.name, p.category, p.purchase_price||0, p.sale_price||0, p.expiry_date||null, p.stock||0, p.sold_by_weight||0, p.image_uri ?? p.imageUri ?? null, now,
-           p.description, p.measurement_unit, p.measurement_value, p.suggested_price, p.offer_price, p.is_active, p.supplier_id, p.tax_rate, now]
+          [p.barcode, p.name, p.category, p.purchase_price || 0, p.sale_price || 0, p.expiry_date || null, p.stock || 0, p.sold_by_weight || 0, p.image_uri ?? p.imageUri ?? null, now,
+          p.description, p.measurement_unit, p.measurement_value, p.suggested_price, p.offer_price, p.is_active, p.supplier_id, p.tax_rate, now]
         );
       });
-    }, reject, ()=>resolve(true));
+    }, reject, () => resolve(true));
   });
 }
 
-export function upsertSuppliersBulk(list){
-  return new Promise((resolve,reject)=>{
-    db().transaction((tx)=>{
-      (list||[]).forEach(s=>{
+export function upsertSuppliersBulk(list) {
+  return new Promise((resolve, reject) => {
+    db().transaction((tx) => {
+      (list || []).forEach(s => {
         tx.executeSql(
           `INSERT OR REPLACE INTO suppliers (id, name, contact_name, phone, email, notes)
            VALUES (?, ?, ?, ?, ?, ?);`,
           [s.id, s.name, s.contact_name, s.phone, s.email, s.notes]
         );
       });
-    }, reject, ()=>resolve(true));
+    }, reject, () => resolve(true));
   });
 }
 
-export function listSuppliers(){
-  return new Promise((resolve,reject)=>{
-    db().transaction((tx)=>{ tx.executeSql(`SELECT * FROM suppliers ORDER BY name ASC;`, [], (_,_r)=>resolve(rowsToArray(_r))); }, reject);
+export function listSuppliers() {
+  return new Promise((resolve, reject) => {
+    db().transaction((tx) => { tx.executeSql(`SELECT * FROM suppliers ORDER BY name ASC;`, [], (_, _r) => resolve(rowsToArray(_r))); }, reject);
   });
 }
 
-export function listLocalProductsUpdatedAfter(){
-  return new Promise((resolve)=> {
-    db().transaction((tx)=>{
-      tx.executeSql(`SELECT MAX(updated_at) as m FROM products;`, [], (_,_r)=>{
+export function listLocalProductsUpdatedAfter() {
+  return new Promise((resolve) => {
+    db().transaction((tx) => {
+      tx.executeSql(`SELECT MAX(updated_at) as m FROM products;`, [], (_, _r) => {
         resolve(_r.rows.item(0)?.m || 0);
       });
     });
   });
 }
 
-export function upsertCategoriesBulk(list){
-  return new Promise((resolve,reject)=>{
-    db().transaction((tx)=>{
-      (list||[]).forEach(c=>{
+export function upsertCategoriesBulk(list) {
+  return new Promise((resolve, reject) => {
+    db().transaction((tx) => {
+      (list || []).forEach(c => {
         tx.executeSql(`INSERT OR IGNORE INTO categories(name) VALUES (?);`, [c.name]);
       });
-    }, reject, ()=>resolve(true));
+    }, reject, () => resolve(true));
   });
 }
 
-export function getProductByBarcode(barcode){
-  return new Promise((resolve,reject)=>{
-    db().transaction((tx)=>{
-      tx.executeSql(`SELECT * FROM products WHERE barcode = ? LIMIT 1;`, [String(barcode)], (_,_r)=>{
-        resolve(_r.rows.length? _r.rows.item(0): null);
+export function getProductByBarcode(barcode) {
+  return new Promise((resolve, reject) => {
+    db().transaction((tx) => {
+      tx.executeSql(`SELECT * FROM products WHERE barcode = ? LIMIT 1;`, [String(barcode)], (_, _r) => {
+        resolve(_r.rows.length ? _r.rows.item(0) : null);
       });
     }, reject);
   });
 }
-export function listProducts(offset=0, limit=20, search=''){
-  return new Promise((resolve,reject)=>{
+export function listProducts(offset = 0, limit = 20, search = '') {
+  return new Promise((resolve, reject) => {
     let sql = `SELECT * FROM products`;
     let params = [];
-    if(search && search.trim()){
+    if (search && search.trim()) {
       sql += ` WHERE (name LIKE ? OR barcode LIKE ?)`;
       const like = `%${search.trim()}%`;
       params.push(like, like);
     }
     sql += ` ORDER BY updated_at DESC, name ASC, id DESC`;
-    if(limit > 0){
+    if (limit > 0) {
       sql += ` LIMIT ?`;
       params.push(limit);
     }
-    if(offset > 0){
+    if (offset > 0) {
       sql += ` OFFSET ?`;
       params.push(offset);
     }
-    db().transaction((tx)=>{
-      tx.executeSql(sql, params, (_,_r)=>resolve(rowsToArray(_r)));
+    db().transaction((tx) => {
+      tx.executeSql(sql, params, (_, _r) => resolve(rowsToArray(_r)));
     }, reject);
   });
 }
-export function getProductsCount(search = ''){
-  return new Promise((resolve, reject)=>{
+export function getProductsCount(search = '') {
+  return new Promise((resolve, reject) => {
     let sql = `SELECT COUNT(*) as count FROM products`;
     const params = [];
-    if(search && search.trim()){
+    if (search && search.trim()) {
       const like = `%${search.trim()}%`;
       sql += ` WHERE (name LIKE ? OR barcode LIKE ?)`;
       params.push(like, like);
     }
-    db().transaction((tx)=>{
+    db().transaction((tx) => {
       tx.executeSql(
         sql,
         params,
-        (_,_r)=>{
+        (_, _r) => {
           const raw = _r.rows.length ? _r.rows.item(0).count : 0;
           resolve(Number(raw) || 0);
         }
@@ -542,14 +584,14 @@ export function getProductsCount(search = ''){
     }, reject);
   });
 }
-export function deleteProductByBarcode(barcode){
-  return new Promise((resolve,reject)=>{
-    db().transaction((tx)=>{ tx.executeSql(`DELETE FROM products WHERE barcode=?;`, [String(barcode)]); }, reject, ()=>resolve(true));
+export function deleteProductByBarcode(barcode) {
+  return new Promise((resolve, reject) => {
+    db().transaction((tx) => { tx.executeSql(`DELETE FROM products WHERE barcode=?;`, [String(barcode)]); }, reject, () => resolve(true));
   });
 }
-export function exportAllProductsOrdered(){
-  return new Promise((resolve,reject)=>{
-    db().transaction((tx)=>{
+export function exportAllProductsOrdered() {
+  return new Promise((resolve, reject) => {
+    db().transaction((tx) => {
       tx.executeSql(
         `SELECT barcode, barcode AS id, IFNULL(name,'') AS name, IFNULL(category,'') AS category,
                 IFNULL(purchase_price,0) AS purchasePrice, IFNULL(sale_price,0) AS salePrice,
@@ -557,83 +599,83 @@ export function exportAllProductsOrdered(){
                 IFNULL(sold_by_weight,0) AS soldByWeight,
                 IFNULL(image_uri,'') AS imageUri
          FROM products ORDER BY name ASC, id DESC;`,
-        [], (_,_r)=>resolve(rowsToArray(_r))
+        [], (_, _r) => resolve(rowsToArray(_r))
       );
     }, reject);
   });
 }
 
 // ---------- CATEGORIES ----------
-export function listCategories(){
-  return new Promise((resolve,reject)=>{
-    db().transaction((tx)=>{ tx.executeSql(`SELECT * FROM categories ORDER BY name ASC;`, [], (_,_r)=>resolve(rowsToArray(_r))); }, reject);
+export function listCategories() {
+  return new Promise((resolve, reject) => {
+    db().transaction((tx) => { tx.executeSql(`SELECT * FROM categories ORDER BY name ASC;`, [], (_, _r) => resolve(rowsToArray(_r))); }, reject);
   });
 }
-export function addCategory(name){
-  return new Promise((resolve,reject)=>{
-    db().transaction((tx)=>{
+export function addCategory(name) {
+  return new Promise((resolve, reject) => {
+    db().transaction((tx) => {
       tx.executeSql(`INSERT OR IGNORE INTO categories(name) VALUES (?);`, [name]);
-      tx.executeSql(`SELECT * FROM categories WHERE name=?;`, [name], (_,_r)=> resolve(_r.rows.length? _r.rows.item(0) : {id:0,name}));
+      tx.executeSql(`SELECT * FROM categories WHERE name=?;`, [name], (_, _r) => resolve(_r.rows.length ? _r.rows.item(0) : { id: 0, name }));
     }, reject);
   });
 }
 
 // ---------- SALES ----------
 /** Registra venta local + encola para sync (outbox). */
-export function recordSale(cart, opts = {}){
+export function recordSale(cart, opts = {}) {
   const items = Array.isArray(cart) ? cart : [];
-  const totalRaw = items.reduce((a,it)=> a + (Number(it.qty||0) * Number(it.unit_price||0)), 0);
-  const discount = Number(opts.discount||0)||0;
-  const tax = Number(opts.tax||0)||0;
+  const totalRaw = items.reduce((a, it) => a + (Number(it.qty || 0) * Number(it.unit_price || 0)), 0);
+  const discount = Number(opts.discount || 0) || 0;
+  const tax = Number(opts.tax || 0) || 0;
   const total = Math.max(0, totalRaw - discount + tax);
   const ts = Date.now();
   const payment = opts.paymentMethod || 'efectivo';
-  const cashReceived = Number(opts.amountPaid||0)||0;
+  const cashReceived = Number(opts.amountPaid || 0) || 0;
   const change = Math.max(0, cashReceived - total);
   const notes = opts.note || null;
   const transferUri = opts.transferReceiptUri || null;
   const transferName = opts.transferReceiptName || null;
 
-  const clientSaleId = `local-${ts}-${Math.random().toString(36).slice(2,8)}`;
+  const clientSaleId = `local-${ts}-${Math.random().toString(36).slice(2, 8)}`;
 
-  return new Promise((resolve,reject)=>{
-    let firstError=null;
-    db().transaction((tx)=>{
+  return new Promise((resolve, reject) => {
+    let firstError = null;
+    db().transaction((tx) => {
       tx.executeSql(
         `INSERT INTO sales (ts,total,payment_method,cash_received,change_given,discount,tax,notes,transfer_receipt_uri,transfer_receipt_name,voided)
          VALUES (?,?,?,?,?,?,?,?,?,?,0);`,
-        [ts,total,payment,cashReceived,change,discount,tax,notes,transferUri,transferName],
-        (_insert,res)=>{
+        [ts, total, payment, cashReceived, change, discount, tax, notes, transferUri, transferName],
+        (_insert, res) => {
           const saleId = res.insertId;
 
           const itemsJson = [];
-          items.forEach(it=>{
-            const qty = Number(it.qty||0)||0;
-            const unit = Number(it.unit_price||0)||0;
-            const subtotal = qty*unit;
-            itemsJson.push({ barcode:String(it.barcode), name:it.name||null, qty, unit_price:unit, subtotal });
+          items.forEach(it => {
+            const qty = Number(it.qty || 0) || 0;
+            const unit = Number(it.unit_price || 0) || 0;
+            const subtotal = qty * unit;
+            itemsJson.push({ barcode: String(it.barcode), name: it.name || null, qty, unit_price: unit, subtotal });
 
             tx.executeSql(
               `INSERT INTO sale_items (sale_id,barcode,name,qty,unit_price,subtotal) VALUES (?,?,?,?,?,?);`,
-              [saleId, String(it.barcode), it.name||null, qty, unit, subtotal],
+              [saleId, String(it.barcode), it.name || null, qty, unit, subtotal],
               undefined,
-              (_,_e)=>{ firstError = firstError || _e; return true; }
+              (_, _e) => { firstError = firstError || _e; return true; }
             );
             tx.executeSql(
               `UPDATE products SET stock = CASE WHEN IFNULL(stock,0) - ? < 0 THEN 0 ELSE IFNULL(stock,0) - ? END, updated_at = ?
                WHERE barcode = ?;`,
-              [qty,qty,ts,String(it.barcode)],
+              [qty, qty, ts, String(it.barcode)],
               undefined,
-              (_,_e)=>{ firstError = firstError || _e; return true; }
+              (_, _e) => { firstError = firstError || _e; return true; }
             );
           });
 
           // Encolar para sync
           const payload = {
             total,
-            payment_method:payment,
-            cash_received:cashReceived,
-            change_given:change,
+            payment_method: payment,
+            cash_received: cashReceived,
+            change_given: change,
             discount,
             tax,
             notes,
@@ -647,16 +689,16 @@ export function recordSale(cart, opts = {}){
              VALUES (?, ?, ?, 0, ?);`,
             [saleId, clientSaleId, JSON.stringify(payload), ts],
             undefined,
-            (_,_e)=>{ firstError = firstError || _e; return true; }
+            (_, _e) => { firstError = firstError || _e; return true; }
           );
         },
-        (_,_e)=>{ firstError = firstError || _e; return true; }
+        (_, _e) => { firstError = firstError || _e; return true; }
       );
-    }, (txErr)=> reject(firstError||txErr), ()=> resolve({ ok:true, ts, clientSaleId }) );
+    }, (txErr) => reject(firstError || txErr), () => resolve({ ok: true, ts, clientSaleId }));
   });
 }
 
-export function insertSaleFromCloud(payload){
+export function insertSaleFromCloud(payload) {
   const items = Array.isArray(payload?.items) ? payload.items : [];
   const ts = Number(payload?.ts || Date.now());
   const total = Number(payload?.total || 0);
@@ -671,14 +713,14 @@ export function insertSaleFromCloud(payload){
   const cloudId = payload?.cloud_id ?? null;
   const clientSaleId = payload?.client_sale_id ?? null;
 
-  return new Promise((resolve,reject)=>{
-    let firstError=null;
-    db().transaction((tx)=>{
+  return new Promise((resolve, reject) => {
+    let firstError = null;
+    db().transaction((tx) => {
       // Verificar si ya existe una venta con el mismo timestamp y total, o por cloud_id
       // 🆕 MEJORA: Verificar también por client_sale_id (buscando en outbox_sales)
       let query = `SELECT id, transfer_receipt_uri, cloud_id FROM sales WHERE ts = ? AND total = ? LIMIT 1;`;
       let params = [ts, total];
-      
+
       if (cloudId) {
         query = `SELECT id, transfer_receipt_uri, cloud_id FROM sales WHERE cloud_id = ? OR (ts = ? AND total = ?) LIMIT 1;`;
         params = [cloudId, ts, total];
@@ -701,7 +743,7 @@ export function insertSaleFromCloud(payload){
               params,
               (_checkTx, checkRes) => {
                 let existing = null;
-                
+
                 // 1. Prioridad: Coincidencia por outbox (client_sale_id)
                 if (localIdFromOutbox) {
                   // Verificar si existe en sales
@@ -742,10 +784,10 @@ export function insertSaleFromCloud(payload){
                       (_, err) => console.warn('Error actualizando comprobante:', err)
                     );
                   } else if (cloudId && !existingRecord.cloud_id) {
-                     // Vincular cloud_id si falta
-                     tx.executeSql(`UPDATE sales SET cloud_id = ? WHERE id = ?;`, [cloudId, existingRecord.id]);
+                    // Vincular cloud_id si falta
+                    tx.executeSql(`UPDATE sales SET cloud_id = ? WHERE id = ?;`, [cloudId, existingRecord.id]);
                   }
-                  
+
                   resolve(existingRecord.id);
                 }
 
@@ -754,41 +796,41 @@ export function insertSaleFromCloud(payload){
                   tx.executeSql(
                     `INSERT INTO sales (ts,total,payment_method,cash_received,change_given,discount,tax,notes,transfer_receipt_uri,transfer_receipt_name,voided,cloud_id)
                      VALUES (?,?,?,?,?,?,?,?,?,?,0,?);`,
-                    [ts,total,payment,cashReceived,change,discount,tax,notes,transferUri,transferName,cloudId],
-                    (_insert,res)=>{
+                    [ts, total, payment, cashReceived, change, discount, tax, notes, transferUri, transferName, cloudId],
+                    (_insert, res) => {
                       const saleId = res.insertId;
                       console.log(`✅ Venta desde cloud insertada: saleId=${saleId}, ts=${ts}, total=${total}`);
-                      
-                      (items||[]).forEach(it=>{
-                        const qty = Number(it.qty||0)||0;
-                        const unit = Number(it.unit_price||0)||0;
-                        const subtotal = qty*unit;
+
+                      (items || []).forEach(it => {
+                        const qty = Number(it.qty || 0) || 0;
+                        const unit = Number(it.unit_price || 0) || 0;
+                        const subtotal = qty * unit;
                         tx.executeSql(
                           `INSERT INTO sale_items (sale_id,barcode,name,qty,unit_price,subtotal) VALUES (?,?,?,?,?,?);`,
-                          [saleId, String(it.barcode), it.name||null, qty, unit, subtotal],
+                          [saleId, String(it.barcode), it.name || null, qty, unit, subtotal],
                           undefined,
-                          (_,_e)=>{ firstError = firstError || _e; return true; }
+                          (_, _e) => { firstError = firstError || _e; return true; }
                         );
                         tx.executeSql(
                           `UPDATE products SET stock = CASE WHEN IFNULL(stock,0) - ? < 0 THEN 0 ELSE IFNULL(stock,0) - ? END, updated_at = ? WHERE barcode = ?;`,
-                          [qty,qty,ts,String(it.barcode)],
+                          [qty, qty, ts, String(it.barcode)],
                           undefined,
-                          (_,_e)=>{ firstError = firstError || _e; return true; }
+                          (_, _e) => { firstError = firstError || _e; return true; }
                         );
                       });
-                      
+
                       // Si tenemos client_sale_id (vino de otro dispositivo o se recuperó), lo guardamos en outbox para referencia futura
                       if (clientSaleId) {
-                         tx.executeSql(
+                        tx.executeSql(
                           `INSERT OR IGNORE INTO outbox_sales (local_sale_id, client_sale_id, payload_json, synced, created_at)
                            VALUES (?, ?, '{}', 1, ?);`,
                           [saleId, clientSaleId, ts]
                         );
                       }
-                      
+
                       resolve(saleId);
                     },
-                    (_,_e)=>{ firstError = firstError || _e; return true; }
+                    (_, _e) => { firstError = firstError || _e; return true; }
                   );
                 }
               }
@@ -815,49 +857,49 @@ export function insertSaleFromCloud(payload){
                   (_, err) => console.warn('Error actualizando comprobante:', err)
                 );
               } else if (cloudId && !existing.cloud_id) {
-                 // Vincular cloud_id si falta
-                 tx.executeSql(`UPDATE sales SET cloud_id = ? WHERE id = ?;`, [cloudId, existing.id]);
+                // Vincular cloud_id si falta
+                tx.executeSql(`UPDATE sales SET cloud_id = ? WHERE id = ?;`, [cloudId, existing.id]);
               }
-              
+
               resolve(existing.id);
               return;
             }
-            
+
             // No existe, proceder con la inserción
             tx.executeSql(
               `INSERT INTO sales (ts,total,payment_method,cash_received,change_given,discount,tax,notes,transfer_receipt_uri,transfer_receipt_name,voided,cloud_id)
                VALUES (?,?,?,?,?,?,?,?,?,?,0,?);`,
-              [ts,total,payment,cashReceived,change,discount,tax,notes,transferUri,transferName,cloudId],
-              (_insert,res)=>{
+              [ts, total, payment, cashReceived, change, discount, tax, notes, transferUri, transferName, cloudId],
+              (_insert, res) => {
                 const saleId = res.insertId;
                 console.log(`✅ Venta desde cloud insertada: saleId=${saleId}, ts=${ts}, total=${total}`);
-                
-                (items||[]).forEach(it=>{
-                  const qty = Number(it.qty||0)||0;
-                  const unit = Number(it.unit_price||0)||0;
-                  const subtotal = qty*unit;
+
+                (items || []).forEach(it => {
+                  const qty = Number(it.qty || 0) || 0;
+                  const unit = Number(it.unit_price || 0) || 0;
+                  const subtotal = qty * unit;
                   tx.executeSql(
                     `INSERT INTO sale_items (sale_id,barcode,name,qty,unit_price,subtotal) VALUES (?,?,?,?,?,?);`,
-                    [saleId, String(it.barcode), it.name||null, qty, unit, subtotal],
+                    [saleId, String(it.barcode), it.name || null, qty, unit, subtotal],
                     undefined,
-                    (_,_e)=>{ firstError = firstError || _e; return true; }
+                    (_, _e) => { firstError = firstError || _e; return true; }
                   );
                   tx.executeSql(
                     `UPDATE products SET stock = CASE WHEN IFNULL(stock,0) - ? < 0 THEN 0 ELSE IFNULL(stock,0) - ? END, updated_at = ? WHERE barcode = ?;`,
-                    [qty,qty,ts,String(it.barcode)],
+                    [qty, qty, ts, String(it.barcode)],
                     undefined,
-                    (_,_e)=>{ firstError = firstError || _e; return true; }
+                    (_, _e) => { firstError = firstError || _e; return true; }
                   );
                 });
                 resolve(saleId);
               },
-              (_,_e)=>{ firstError = firstError || _e; return true; }
+              (_, _e) => { firstError = firstError || _e; return true; }
             );
           },
-          (_,_e)=>{ firstError = firstError || _e; return true; }
+          (_, _e) => { firstError = firstError || _e; return true; }
         );
       }
-    }, (txErr)=> reject(firstError||txErr) ); // Removed resolve(true) here because we resolve inside
+    }, (txErr) => reject(firstError || txErr)); // Removed resolve(true) here because we resolve inside
   });
 }
 
@@ -943,109 +985,109 @@ export function updateSaleTransferReceipt(saleId, proofUri, proofName) {
   });
 }
 
-export function listRecentSales(limit=50){
-  return new Promise((resolve,reject)=>{
-    db().transaction((tx)=>{
+export function listRecentSales(limit = 50) {
+  return new Promise((resolve, reject) => {
+    db().transaction((tx) => {
       tx.executeSql(
         `SELECT id,ts,total,payment_method,cash_received,change_given,discount,tax,voided
            FROM sales WHERE COALESCE(voided,0)=0
            ORDER BY ts DESC LIMIT ?;`,
-        [limit], (_,_r)=>resolve(rowsToArray(_r))
+        [limit], (_, _r) => resolve(rowsToArray(_r))
       );
     }, reject);
   });
 }
 
-export function getLastSaleTs(){
-  return new Promise(resolve=>{
-    db().transaction(tx=>{
-      tx.executeSql(`SELECT MAX(ts) as m FROM sales;`, [], (_,_r)=>{
+export function getLastSaleTs() {
+  return new Promise(resolve => {
+    db().transaction(tx => {
+      tx.executeSql(`SELECT MAX(ts) as m FROM sales;`, [], (_, _r) => {
         resolve(_r.rows.item(0)?.m || 0);
       });
     });
   });
 }
-export function listSalesBetween(fromTs,toTs){
-  return new Promise((resolve,reject)=>{
-    const params=[]; let where='WHERE COALESCE(voided,0)=0';
-    if(typeof fromTs==='number'){ where+=' AND ts >= ?'; params.push(fromTs); }
-    if(typeof toTs==='number'){ where+=' AND ts <= ?'; params.push(toTs); }
-    db().transaction((tx)=>{
+export function listSalesBetween(fromTs, toTs) {
+  return new Promise((resolve, reject) => {
+    const params = []; let where = 'WHERE COALESCE(voided,0)=0';
+    if (typeof fromTs === 'number') { where += ' AND ts >= ?'; params.push(fromTs); }
+    if (typeof toTs === 'number') { where += ' AND ts <= ?'; params.push(toTs); }
+    db().transaction((tx) => {
       tx.executeSql(`SELECT id,ts,total,payment_method,cash_received,change_given,discount,tax,voided,transfer_receipt_uri,transfer_receipt_name FROM sales ${where} ORDER BY ts DESC;`,
-        params, (_,_r)=>resolve(rowsToArray(_r)));
+        params, (_, _r) => resolve(rowsToArray(_r)));
     }, reject);
   });
 }
-export function getSaleWithItems(saleId){
-  return new Promise((resolve,reject)=>{
-    db().transaction((tx)=>{
-      tx.executeSql(`SELECT * FROM sales WHERE id=?;`, [saleId], (_,_sr)=>{
-        if(!_sr.rows.length) return resolve(null);
-        const sale=_sr.rows.item(0);
-        tx.executeSql(`SELECT * FROM sale_items WHERE sale_id=? ORDER BY id ASC;`, [saleId], (_,_ir)=>{
+export function getSaleWithItems(saleId) {
+  return new Promise((resolve, reject) => {
+    db().transaction((tx) => {
+      tx.executeSql(`SELECT * FROM sales WHERE id=?;`, [saleId], (_, _sr) => {
+        if (!_sr.rows.length) return resolve(null);
+        const sale = _sr.rows.item(0);
+        tx.executeSql(`SELECT * FROM sale_items WHERE sale_id=? ORDER BY id ASC;`, [saleId], (_, _ir) => {
           resolve({ sale, items: rowsToArray(_ir) });
         });
       });
     }, reject);
   });
 }
-export function exportSalesCSV(fromTs,toTs){
-  return new Promise((resolve,reject)=>{
-    const params=[]; let where='WHERE COALESCE(s.voided,0)=0';
-    if(typeof fromTs==='number'){ where+=' AND s.ts >= ?'; params.push(fromTs); }
-    if(typeof toTs==='number'){ where+=' AND s.ts <= ?'; params.push(toTs); }
-    db().transaction((tx)=>{
+export function exportSalesCSV(fromTs, toTs) {
+  return new Promise((resolve, reject) => {
+    const params = []; let where = 'WHERE COALESCE(s.voided,0)=0';
+    if (typeof fromTs === 'number') { where += ' AND s.ts >= ?'; params.push(fromTs); }
+    if (typeof toTs === 'number') { where += ' AND s.ts <= ?'; params.push(toTs); }
+    db().transaction((tx) => {
       tx.executeSql(
         `SELECT s.id,s.ts,s.total,s.payment_method,s.cash_received,s.change_given,s.discount,s.tax,
                 i.barcode,i.name,i.qty,i.unit_price,i.subtotal
            FROM sales s JOIN sale_items i ON i.sale_id=s.id
            ${where}
            ORDER BY s.ts DESC, i.id ASC;`,
-        params, (_,_r)=>{
-          let csv='sale_id,ts,total,payment_method,cash_received,change_given,discount,tax,barcode,name,qty,unit_price,subtotal\n';
-          for(let i=0;i<_r.rows.length;i++){
-            const r=_r.rows.item(i);
-            const line=[r.id,r.ts,r.total,r.payment_method||'',r.cash_received??'',r.change_given??'',r.discount??0,r.tax??0,
-              `"${String(r.barcode).replace(/"/g,'""')}"`,`"${String(r.name||'').replace(/"/g,'""')}"`,r.qty,r.unit_price,r.subtotal].join(',');
-            csv+=line+'\n';
+        params, (_, _r) => {
+          let csv = 'sale_id,ts,total,payment_method,cash_received,change_given,discount,tax,barcode,name,qty,unit_price,subtotal\n';
+          for (let i = 0; i < _r.rows.length; i++) {
+            const r = _r.rows.item(i);
+            const line = [r.id, r.ts, r.total, r.payment_method || '', r.cash_received ?? '', r.change_given ?? '', r.discount ?? 0, r.tax ?? 0,
+            `"${String(r.barcode).replace(/"/g, '""')}"`, `"${String(r.name || '').replace(/"/g, '""')}"`, r.qty, r.unit_price, r.subtotal].join(',');
+            csv += line + '\n';
           } resolve(csv);
         });
     }, reject);
   });
 }
-export function voidSale(saleId){
-  return new Promise((resolve,reject)=>{
-    db().transaction((tx)=>{
-      tx.executeSql(`SELECT barcode, qty FROM sale_items WHERE sale_id=?;`, [saleId], (_,_ir)=>{
-        const items=rowsToArray(_ir); const ts=Date.now();
-        items.forEach(it=>{
-          tx.executeSql(`UPDATE products SET stock = IFNULL(stock,0) + ?, updated_at=? WHERE barcode=?;`, [Number(it.qty||0)||0, ts, String(it.barcode)]);
+export function voidSale(saleId) {
+  return new Promise((resolve, reject) => {
+    db().transaction((tx) => {
+      tx.executeSql(`SELECT barcode, qty FROM sale_items WHERE sale_id=?;`, [saleId], (_, _ir) => {
+        const items = rowsToArray(_ir); const ts = Date.now();
+        items.forEach(it => {
+          tx.executeSql(`UPDATE products SET stock = IFNULL(stock,0) + ?, updated_at=? WHERE barcode=?;`, [Number(it.qty || 0) || 0, ts, String(it.barcode)]);
         });
         tx.executeSql(`UPDATE sales SET voided=1 WHERE id=?;`, [saleId]);
       });
-    }, reject, ()=>resolve(true));
+    }, reject, () => resolve(true));
   });
 }
-export function getSalesSeries(fromTs,toTs,granularity='day'){
-  const fmt = granularity==='month' ? '%Y-%m' : '%Y-%m-%d';
-  return new Promise((resolve,reject)=>{
-    const params=[]; let where='WHERE COALESCE(voided,0)=0';
-    if(typeof fromTs==='number'){ where+=' AND ts >= ?'; params.push(fromTs); }
-    if(typeof toTs==='number'){ where+=' AND ts <= ?'; params.push(toTs); }
-    db().transaction((tx)=>{
+export function getSalesSeries(fromTs, toTs, granularity = 'day') {
+  const fmt = granularity === 'month' ? '%Y-%m' : '%Y-%m-%d';
+  return new Promise((resolve, reject) => {
+    const params = []; let where = 'WHERE COALESCE(voided,0)=0';
+    if (typeof fromTs === 'number') { where += ' AND ts >= ?'; params.push(fromTs); }
+    if (typeof toTs === 'number') { where += ' AND ts <= ?'; params.push(toTs); }
+    db().transaction((tx) => {
       tx.executeSql(
         `SELECT strftime('${fmt}', ts/1000, 'unixepoch', 'localtime') AS bucket,
                 SUM(total) AS total, COUNT(*) AS n
            FROM sales ${where} GROUP BY bucket ORDER BY bucket ASC;`,
-        params, (_,_r)=>resolve(rowsToArray(_r)));
+        params, (_, _r) => resolve(rowsToArray(_r)));
     }, reject);
   });
 }
 
 // ---------- OUTBOX / SYNC ----------
-export function getUnsyncedSales(){
-  return new Promise((resolve,reject)=>{
-    db().transaction((tx)=>{
+export function getUnsyncedSales() {
+  return new Promise((resolve, reject) => {
+    db().transaction((tx) => {
       tx.executeSql(
         `SELECT o.id as outbox_id, o.local_sale_id, o.client_sale_id, o.payload_json,
                 s.total, s.payment_method, s.cash_received, s.change_given, s.discount, s.tax, s.notes,
@@ -1055,7 +1097,7 @@ export function getUnsyncedSales(){
           WHERE o.synced=0
           ORDER BY o.created_at ASC
           LIMIT 50;`,
-        [], (_,_r)=> {
+        [], (_, _r) => {
           const list = rowsToArray(_r).map(r => {
             let payload = {};
             try {
@@ -1064,12 +1106,12 @@ export function getUnsyncedSales(){
               console.warn('⚠️ Error parseando payload_json:', e);
               payload = {};
             }
-            
+
             // Priorizar transfer_receipt_uri/name de la tabla sales
             // Si no existen, usar del payload como fallback
             const transfer_receipt_uri = r.transfer_receipt_uri || payload.transfer_receipt_uri || null;
             const transfer_receipt_name = r.transfer_receipt_name || payload.transfer_receipt_name || null;
-            
+
             return {
               outbox_id: r.outbox_id,
               local_sale_id: r.local_sale_id,
@@ -1092,29 +1134,29 @@ export function getUnsyncedSales(){
     }, reject);
   });
 }
-export function markSaleSynced(localSaleId, cloudSaleId){
-  return new Promise((resolve,reject)=>{
-    const now=Date.now();
-    db().transaction((tx)=>{
-      tx.executeSql(`UPDATE outbox_sales SET synced=1, cloud_sale_id=?, synced_at=? WHERE local_sale_id=?;`, [String(cloudSaleId||''), now, localSaleId]);
+export function markSaleSynced(localSaleId, cloudSaleId) {
+  return new Promise((resolve, reject) => {
+    const now = Date.now();
+    db().transaction((tx) => {
+      tx.executeSql(`UPDATE outbox_sales SET synced=1, cloud_sale_id=?, synced_at=? WHERE local_sale_id=?;`, [String(cloudSaleId || ''), now, localSaleId]);
       // Guardar también el cloud_id en la tabla sales para facilitar reparaciones
-      tx.executeSql(`UPDATE sales SET cloud_id=? WHERE id=?;`, [String(cloudSaleId||''), localSaleId]);
-    }, reject, ()=>resolve(true));
+      tx.executeSql(`UPDATE sales SET cloud_id=? WHERE id=?;`, [String(cloudSaleId || ''), localSaleId]);
+    }, reject, () => resolve(true));
   });
 }
 
 // Obtener outbox por cloud_sale_id (para reparar items faltantes)
-export function getOutboxByCloudSaleId(cloudSaleId){
-  return new Promise((resolve,reject)=>{
-    db().transaction((tx)=>{
+export function getOutboxByCloudSaleId(cloudSaleId) {
+  return new Promise((resolve, reject) => {
+    db().transaction((tx) => {
       tx.executeSql(
         `SELECT local_sale_id, client_sale_id, payload_json FROM outbox_sales WHERE cloud_sale_id=? LIMIT 1;`,
         [String(cloudSaleId)],
-        (_,_r)=>{
-          if(!_r.rows.length) return resolve(null);
-          const row=_r.rows.item(0);
-          let payload={};
-          try{ payload=JSON.parse(row.payload_json); }catch(e){ payload={}; }
+        (_, _r) => {
+          if (!_r.rows.length) return resolve(null);
+          const row = _r.rows.item(0);
+          let payload = {};
+          try { payload = JSON.parse(row.payload_json); } catch (e) { payload = {}; }
           resolve({ local_sale_id: row.local_sale_id, client_sale_id: row.client_sale_id, payload });
         }
       );
@@ -1165,11 +1207,11 @@ export function calculateExpectedCashAmount(sessionId) {
             reject(new Error('Sesión no encontrada'));
             return;
           }
-          
+
           const session = sessionResult.rows.item(0);
           const openingAmount = session.opening_amount;
           const startTimestamp = new Date(session.start_date).getTime();
-          
+
           // Obtener ventas desde que se abrió la caja
           tx.executeSql(
             `SELECT 
@@ -1182,7 +1224,7 @@ export function calculateExpectedCashAmount(sessionId) {
               const data = salesResult.rows.item(0);
               // Fórmula corregida: monto inicial + dinero recibido - vuelto dado
               const expectedAmount = openingAmount + data.cash_received - data.total_change;
-              
+
               resolve({
                 openingAmount,
                 cashReceived: data.cash_received,
@@ -1206,7 +1248,7 @@ export function closeCashSession(sessionId, actualAmount, countDetails, userId, 
       const difference = actualAmount - cashData.expectedAmount;
       const endDate = new Date().toISOString();
       const amountToSafe = actualAmount - nextDayAmount; // Lo que va a caja fuerte
-      
+
       db().transaction((tx) => {
         // Cerrar la sesión de caja
         tx.executeSql(
@@ -1230,13 +1272,13 @@ export function closeCashSession(sessionId, actualAmount, countDetails, userId, 
                 );
               });
             }
-            
+
             // Depositar el dinero a caja fuerte (descontando lo del día siguiente)
             if (amountToSafe > 0) {
-              const description = nextDayAmount > 0 
+              const description = nextDayAmount > 0
                 ? `Depósito al cerrar caja - Sesión ${sessionId} (Dejando $${nextDayAmount.toLocaleString()} para mañana)`
                 : `Depósito automático al cerrar caja - Sesión ${sessionId}`;
-                
+
               tx.executeSql(
                 `INSERT INTO safe_movements (type, amount, description, session_id, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
                 ['deposit', amountToSafe, description, sessionId, `${userId}|${userName}`, endDate],
@@ -1370,12 +1412,12 @@ export function getCashTransactionsHistory(limit = 50) {
         
         ORDER BY timestamp DESC
         LIMIT ?
-      `, [Math.min(limit, 20)], 
-      (_, result) => {
-        const sessions = rowsToArray(result);
-        
-        // Obtener movimientos de caja fuerte
-        tx.executeSql(`
+      `, [Math.min(limit, 20)],
+        (_, result) => {
+          const sessions = rowsToArray(result);
+
+          // Obtener movimientos de caja fuerte
+          tx.executeSql(`
           SELECT 
             'safe_movement' as type,
             sm.created_at as timestamp,
@@ -1395,11 +1437,11 @@ export function getCashTransactionsHistory(limit = 50) {
           ORDER BY sm.created_at DESC
           LIMIT ?
         `, [Math.min(limit, 20)],
-        (_, movementsResult) => {
-          const movements = rowsToArray(movementsResult);
-          
-          // Obtener ventas con efectivo
-          tx.executeSql(`
+            (_, movementsResult) => {
+              const movements = rowsToArray(movementsResult);
+
+              // Obtener ventas con efectivo
+              tx.executeSql(`
             SELECT 
               'sale' as type,
               datetime(s.ts/1000, 'unixepoch') as timestamp,
@@ -1412,33 +1454,33 @@ export function getCashTransactionsHistory(limit = 50) {
             ORDER BY s.ts DESC
             LIMIT ?
           `, [Math.min(limit, 20)],
-          (_, salesResult) => {
-            const sales = rowsToArray(salesResult);
-            
-            // Combinar y ordenar todos los resultados
-            const allTransactions = [...sessions, ...movements, ...sales];
-            allTransactions.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-            
-            resolve(allTransactions.slice(0, limit));
-          },
-          (_, error) => {
-            console.warn('Error obteniendo ventas:', error);
-            resolve([...sessions, ...movements].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)));
-          });
+                (_, salesResult) => {
+                  const sales = rowsToArray(salesResult);
+
+                  // Combinar y ordenar todos los resultados
+                  const allTransactions = [...sessions, ...movements, ...sales];
+                  allTransactions.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+
+                  resolve(allTransactions.slice(0, limit));
+                },
+                (_, error) => {
+                  console.warn('Error obteniendo ventas:', error);
+                  resolve([...sessions, ...movements].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)));
+                });
+            },
+            (_, error) => {
+              console.warn('Error obteniendo movimientos:', error);
+              resolve(sessions);
+            });
         },
         (_, error) => {
-          console.warn('Error obteniendo movimientos:', error);
-          resolve(sessions);
+          console.warn('Error obteniendo sesiones:', error);
+          resolve([]);
         });
-      },
-      (_, error) => {
-        console.warn('Error obteniendo sesiones:', error);
+    },
+      (error) => {
+        console.error('Error en transacción de historial:', error);
         resolve([]);
       });
-    }, 
-    (error) => {
-      console.error('Error en transacción de historial:', error);
-      resolve([]);
-    });
   });
 }

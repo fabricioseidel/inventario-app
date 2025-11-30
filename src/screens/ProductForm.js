@@ -20,7 +20,7 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
   const [barcode, setBarcode] = useState(initial?.barcode || '');
   const [name, setName] = useState(initial?.name || '');
   const [category, setCategory] = useState(initial?.category || '');
-  
+
   // Precios
   const [purchasePrice, setPurchasePrice] = useState(initial?.purchasePrice || ''); // Neto
   const [purchasePriceTax, setPurchasePriceTax] = useState(''); // Con IVA
@@ -31,7 +31,7 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
   const [expiryDate, setExpiryDate] = useState(initial?.expiryDate || '');
   const [stock, setStock] = useState(initial?.stock || '');
   const [soldByWeight, setSoldByWeight] = useState(initial?.sold_by_weight ? true : false);
-  
+
   // Nuevos campos
   const [description, setDescription] = useState(initial?.description || '');
   const [measurementUnit, setMeasurementUnit] = useState(initial?.measurement_unit || 'un');
@@ -52,18 +52,18 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
   const nameRef = React.useRef(null);
 
   useEffect(() => {
-    (async () => { 
-      try { 
-        setCats(await listCategories()); 
+    (async () => {
+      try {
+        setCats(await listCategories());
         setSuppliers(await listSuppliers());
-      } catch {} 
+      } catch { }
     })();
   }, []);
 
   // Inicializar valores calculados al cargar
   useEffect(() => {
     const rate = 1 + (Number(taxRate || 19) / 100);
-    
+
     // Purchase Price
     if (purchasePrice && !purchasePriceTax) {
       const gross = Number(purchasePrice) * rate;
@@ -71,10 +71,9 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
       setSuggestedPrice((gross / 0.65).toFixed(0));
     }
 
-    // Sale Price
+    // Sale Price (Ahora es directo, salePrice YA es el precio con IVA)
     if (salePrice && !salePriceTax) {
-      const gross = Number(salePrice) * rate;
-      setSalePriceTax(gross.toFixed(0));
+      setSalePriceTax(String(salePrice));
     }
   }, []); // Solo al montar o si cambian las props iniciales (que no cambian)
 
@@ -108,13 +107,8 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
   // Manejadores de Precio Venta
   const handleSalePriceTaxChange = (val) => {
     setSalePriceTax(val);
-    if (val) {
-      const rate = 1 + (Number(taxRate || 19) / 100);
-      const net = Number(val) / rate;
-      setSalePrice(net.toFixed(0));
-    } else {
-      setSalePrice('');
-    }
+    // Ahora el precio de venta en BD es el mismo que el precio con IVA (D)
+    setSalePrice(val);
   };
 
   const filteredCats = useMemo(() => {
@@ -140,9 +134,9 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
       // Verificar si el nombre ya termina con la medida para no duplicar
       const suffix = `${measurementValue} ${measurementUnit}`;
       const suffixNoSpace = `${measurementValue}${measurementUnit}`;
-      
-      if (!finalName.toLowerCase().endsWith(suffix.toLowerCase()) && 
-          !finalName.toLowerCase().endsWith(suffixNoSpace.toLowerCase())) {
+
+      if (!finalName.toLowerCase().endsWith(suffix.toLowerCase()) &&
+        !finalName.toLowerCase().endsWith(suffixNoSpace.toLowerCase())) {
         finalName = `${finalName} ${measurementValue} ${measurementUnit}`;
       }
     }
@@ -152,7 +146,7 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
       name: finalName,
       category: category.trim(),
       purchasePrice: Number(purchasePrice || 0),
-      salePrice: Number(salePrice || 0),
+      salePrice: Number(salePriceTax || 0), // Guardar el precio final (D) directamente
       expiryDate: expiryDate || null,
       stock: Number(stock || 0),
       soldByWeight: soldByWeight ? 1 : 0,
@@ -191,7 +185,7 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
     }
 
     await performSave(payload);
-    
+
     // 🆕 Forzar sincronización de productos tras guardar
     try {
       const { pushProducts } = require('../sync');
@@ -211,26 +205,27 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
           `El código ${barcode} corresponde a "${existing.name}". ¿Cargar datos para editar?`,
           [
             { text: 'No', style: 'cancel' },
-            { text: 'Sí, cargar', onPress: () => {
+            {
+              text: 'Sí, cargar', onPress: () => {
                 setName(existing.name || '');
                 setCategory(existing.category || '');
-                
+
                 // Cargar precios
                 const rate = 1 + (Number(existing.tax_rate || 19) / 100);
                 const pPrice = Number(existing.purchase_price || 0);
                 const sPrice = Number(existing.sale_price || 0);
-                
+
                 setPurchasePrice(String(pPrice));
                 setSalePrice(String(sPrice));
-                
+
                 if (pPrice) {
                   const gross = pPrice * rate;
                   setPurchasePriceTax(gross.toFixed(0));
                   setSuggestedPrice((gross / 0.65).toFixed(0));
                 }
                 if (sPrice) {
-                  const gross = sPrice * rate;
-                  setSalePriceTax(gross.toFixed(0));
+                  // Precio de venta ya viene con IVA (migrado o nuevo)
+                  setSalePriceTax(String(sPrice));
                 }
 
                 setStock(String(existing.stock || ''));
@@ -241,7 +236,8 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
                 setMeasurementValue(String(existing.measurement_value || '1'));
                 setSupplierId(existing.supplier_id || null);
                 setTaxRate(String(existing.tax_rate || '19'));
-            }}
+              }
+            }
           ]
         );
       }
@@ -273,20 +269,20 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
       <ScrollView style={{ flex: 1, paddingHorizontal: 16, paddingTop: 8 }} contentContainerStyle={{ paddingBottom: 90 }}>
         <Field label="Código de barras">
           <View style={{ flexDirection: 'row', gap: 8 }}>
-            <TextInput 
-              style={[styles.input, { flex: 1 }]} 
-              value={barcode} 
-              onChangeText={setBarcode} 
-              placeholder="Ej: 7800000000001" 
-              keyboardType="numeric" 
+            <TextInput
+              style={[styles.input, { flex: 1 }]}
+              value={barcode}
+              onChangeText={setBarcode}
+              placeholder="Ej: 7800000000001"
+              keyboardType="numeric"
               autoFocus={true}
               blurOnSubmit={false}
               onSubmitEditing={() => {
-                 checkExistingBarcode();
-                 nameRef.current?.focus();
+                checkExistingBarcode();
+                nameRef.current?.focus();
               }}
             />
-            <TouchableOpacity 
+            <TouchableOpacity
               style={{ justifyContent: 'center', alignItems: 'center', backgroundColor: '#eee', borderRadius: 12, paddingHorizontal: 12 }}
               onPress={() => Alert.alert('Info', 'Usa el escáner físico o la cámara (si está disponible) para llenar este campo.')}
             >
@@ -296,12 +292,12 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
         </Field>
 
         <Field label="Nombre">
-          <TextInput 
+          <TextInput
             ref={nameRef}
-            style={styles.input} 
-            value={name} 
-            onChangeText={setName} 
-            placeholder="Ej: Coca-Cola 1.5L" 
+            style={styles.input}
+            value={name}
+            onChangeText={setName}
+            placeholder="Ej: Coca-Cola 1.5L"
           />
         </Field>
 
@@ -327,7 +323,7 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
             </View>
           </View>
           <View style={{ marginTop: 4 }}>
-             <Text style={{ fontSize: 12, color: '#666' }}>Precio Sugerido (Margen ~35%): <Text style={{ fontWeight: 'bold', color: '#000' }}>${suggestedPrice || '0'}</Text></Text>
+            <Text style={{ fontSize: 12, color: '#666' }}>Precio Sugerido (Margen ~35%): <Text style={{ fontWeight: 'bold', color: '#000' }}>${suggestedPrice || '0'}</Text></Text>
           </View>
         </View>
 
@@ -337,12 +333,12 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
           <View style={{ flexDirection: 'row', gap: 10 }}>
             <View style={{ flex: 1 }}>
               <Field label={`Precio Venta (Con IVA)`}>
-                <TextInput 
-                  style={[styles.input, { backgroundColor: '#fff', borderColor: '#2e7d32', borderWidth: 2 }]} 
-                  value={String(salePriceTax)} 
-                  onChangeText={handleSalePriceTaxChange} 
-                  placeholder="0" 
-                  keyboardType="numeric" 
+                <TextInput
+                  style={[styles.input, { backgroundColor: '#fff', borderColor: '#2e7d32', borderWidth: 2 }]}
+                  value={String(salePriceTax)}
+                  onChangeText={handleSalePriceTaxChange}
+                  placeholder="0"
+                  keyboardType="numeric"
                 />
               </Field>
             </View>
@@ -356,7 +352,7 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
             </Field>
           </View>
           <View style={{ flex: 1 }}>
-             {/* Espacio libre o para otro campo */}
+            {/* Espacio libre o para otro campo */}
           </View>
         </View>
 
@@ -381,12 +377,12 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
                 <Field label="Unidad Medida">
                   <TouchableOpacity style={styles.select} onPress={() => setUnitOpen(true)}>
                     <Text style={{ color: measurementUnit ? theme.colors.text : '#999' }}>
-                      {measurementUnit === 'un' ? 'Unidad (un)' : 
-                       measurementUnit === 'kg' ? 'Kilogramo (kg)' :
-                       measurementUnit === 'g' ? 'Gramo (g)' :
-                       measurementUnit === 'lt' ? 'Litro (lt)' :
-                       measurementUnit === 'ml' ? 'Mililitro (ml)' :
-                       measurementUnit || 'Elegir...'}
+                      {measurementUnit === 'un' ? 'Unidad (un)' :
+                        measurementUnit === 'kg' ? 'Kilogramo (kg)' :
+                          measurementUnit === 'g' ? 'Gramo (g)' :
+                            measurementUnit === 'lt' ? 'Litro (lt)' :
+                              measurementUnit === 'ml' ? 'Mililitro (ml)' :
+                                measurementUnit || 'Elegir...'}
                     </Text>
                   </TouchableOpacity>
                 </Field>
@@ -412,9 +408,9 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
                 </Field>
               </View>
             </View>
-            
+
             <Field label="Impuesto (%)">
-               <TextInput style={styles.input} value={taxRate} onChangeText={setTaxRate} keyboardType="numeric" placeholder="19" />
+              <TextInput style={styles.input} value={taxRate} onChangeText={setTaxRate} keyboardType="numeric" placeholder="19" />
             </Field>
           </View>
         )}
@@ -520,9 +516,9 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
               { code: 'lt', label: 'Litro (lt)' },
               { code: 'ml', label: 'Mililitro (ml)' },
             ].map((u) => (
-              <TouchableOpacity 
-                key={u.code} 
-                style={[styles.catItem, measurementUnit === u.code && { backgroundColor: '#e8f5e9', borderColor: '#2e7d32' }]} 
+              <TouchableOpacity
+                key={u.code}
+                style={[styles.catItem, measurementUnit === u.code && { backgroundColor: '#e8f5e9', borderColor: '#2e7d32' }]}
                 onPress={() => { setMeasurementUnit(u.code); setUnitOpen(false); }}
               >
                 <Text style={{ fontWeight: '600', fontSize: 16 }}>{u.label}</Text>
