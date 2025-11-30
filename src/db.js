@@ -633,78 +633,195 @@ export function insertSaleFromCloud(payload){
   const transferUri = payload?.transfer_receipt_uri ?? payload?.transferReceiptUri ?? null;
   const transferName = payload?.transfer_receipt_name ?? payload?.transferReceiptName ?? null;
   const cloudId = payload?.cloud_id ?? null;
+  const clientSaleId = payload?.client_sale_id ?? null;
 
   return new Promise((resolve,reject)=>{
     let firstError=null;
     db().transaction((tx)=>{
       // Verificar si ya existe una venta con el mismo timestamp y total, o por cloud_id
-      let query = `SELECT id, transfer_receipt_uri FROM sales WHERE ts = ? AND total = ? LIMIT 1;`;
+      // 🆕 MEJORA: Verificar también por client_sale_id (buscando en outbox_sales)
+      let query = `SELECT id, transfer_receipt_uri, cloud_id FROM sales WHERE ts = ? AND total = ? LIMIT 1;`;
       let params = [ts, total];
       
       if (cloudId) {
-        query = `SELECT id, transfer_receipt_uri FROM sales WHERE cloud_id = ? OR (ts = ? AND total = ?) LIMIT 1;`;
+        query = `SELECT id, transfer_receipt_uri, cloud_id FROM sales WHERE cloud_id = ? OR (ts = ? AND total = ?) LIMIT 1;`;
         params = [cloudId, ts, total];
       }
 
-      tx.executeSql(
-        query,
-        params,
-        (_checkTx, checkRes) => {
-          if (checkRes.rows.length > 0) {
-            const existing = checkRes.rows.item(0);
-            // Si existe, verificamos si necesitamos actualizar el comprobante
-            if (transferUri && existing.transfer_receipt_uri !== transferUri) {
-              console.log(`🔄 Actualizando comprobante para venta existente id=${existing.id}`);
-              tx.executeSql(
-                `UPDATE sales SET transfer_receipt_uri = ?, transfer_receipt_name = ?, cloud_id = ? WHERE id = ?;`,
-                [transferUri, transferName, cloudId, existing.id],
-                () => {
-                  console.log(`✅ Comprobante actualizado para venta ${existing.id}`);
-                },
-                (_, err) => console.warn('Error actualizando comprobante:', err)
-              );
-            } else if (cloudId && !existing.cloud_id) {
-               // Vincular cloud_id si falta
-               tx.executeSql(`UPDATE sales SET cloud_id = ? WHERE id = ?;`, [cloudId, existing.id]);
+      // Si tenemos client_sale_id, intentamos buscar el local_sale_id en outbox
+      if (clientSaleId) {
+        tx.executeSql(
+          `SELECT local_sale_id FROM outbox_sales WHERE client_sale_id = ? LIMIT 1;`,
+          [clientSaleId],
+          (_txOutbox, outboxRes) => {
+            let localIdFromOutbox = null;
+            if (outboxRes.rows.length > 0) {
+              localIdFromOutbox = outboxRes.rows.item(0).local_sale_id;
+            }
+
+            // Ahora ejecutamos la consulta principal de sales
+            tx.executeSql(
+              query,
+              params,
+              (_checkTx, checkRes) => {
+                let existing = null;
+                
+                // 1. Prioridad: Coincidencia por outbox (client_sale_id)
+                if (localIdFromOutbox) {
+                  // Verificar si existe en sales
+                  tx.executeSql(
+                    `SELECT id, transfer_receipt_uri, cloud_id FROM sales WHERE id = ? LIMIT 1;`,
+                    [localIdFromOutbox],
+                    (_txLocal, localRes) => {
+                      if (localRes.rows.length > 0) {
+                        existing = localRes.rows.item(0);
+                        processExisting(existing);
+                      } else {
+                        // Raro: está en outbox pero no en sales (borrado?), procedemos a insertar
+                        processInsert();
+                      }
+                    }
+                  );
+                  return;
+                }
+
+                // 2. Si no encontramos por outbox, usamos la búsqueda por cloud_id/ts/total
+                if (checkRes.rows.length > 0) {
+                  existing = checkRes.rows.item(0);
+                  processExisting(existing);
+                } else {
+                  processInsert();
+                }
+
+                function processExisting(existingRecord) {
+                  // Si existe, verificamos si necesitamos actualizar el comprobante
+                  if (transferUri && existingRecord.transfer_receipt_uri !== transferUri) {
+                    console.log(`🔄 Actualizando comprobante para venta existente id=${existingRecord.id}`);
+                    tx.executeSql(
+                      `UPDATE sales SET transfer_receipt_uri = ?, transfer_receipt_name = ?, cloud_id = ? WHERE id = ?;`,
+                      [transferUri, transferName, cloudId, existingRecord.id],
+                      () => {
+                        console.log(`✅ Comprobante actualizado para venta ${existingRecord.id}`);
+                      },
+                      (_, err) => console.warn('Error actualizando comprobante:', err)
+                    );
+                  } else if (cloudId && !existingRecord.cloud_id) {
+                     // Vincular cloud_id si falta
+                     tx.executeSql(`UPDATE sales SET cloud_id = ? WHERE id = ?;`, [cloudId, existingRecord.id]);
+                  }
+                  
+                  resolve(existingRecord.id);
+                }
+
+                function processInsert() {
+                  // No existe, proceder con la inserción
+                  tx.executeSql(
+                    `INSERT INTO sales (ts,total,payment_method,cash_received,change_given,discount,tax,notes,transfer_receipt_uri,transfer_receipt_name,voided,cloud_id)
+                     VALUES (?,?,?,?,?,?,?,?,?,?,0,?);`,
+                    [ts,total,payment,cashReceived,change,discount,tax,notes,transferUri,transferName,cloudId],
+                    (_insert,res)=>{
+                      const saleId = res.insertId;
+                      console.log(`✅ Venta desde cloud insertada: saleId=${saleId}, ts=${ts}, total=${total}`);
+                      
+                      (items||[]).forEach(it=>{
+                        const qty = Number(it.qty||0)||0;
+                        const unit = Number(it.unit_price||0)||0;
+                        const subtotal = qty*unit;
+                        tx.executeSql(
+                          `INSERT INTO sale_items (sale_id,barcode,name,qty,unit_price,subtotal) VALUES (?,?,?,?,?,?);`,
+                          [saleId, String(it.barcode), it.name||null, qty, unit, subtotal],
+                          undefined,
+                          (_,_e)=>{ firstError = firstError || _e; return true; }
+                        );
+                        tx.executeSql(
+                          `UPDATE products SET stock = CASE WHEN IFNULL(stock,0) - ? < 0 THEN 0 ELSE IFNULL(stock,0) - ? END, updated_at = ? WHERE barcode = ?;`,
+                          [qty,qty,ts,String(it.barcode)],
+                          undefined,
+                          (_,_e)=>{ firstError = firstError || _e; return true; }
+                        );
+                      });
+                      
+                      // Si tenemos client_sale_id (vino de otro dispositivo o se recuperó), lo guardamos en outbox para referencia futura
+                      if (clientSaleId) {
+                         tx.executeSql(
+                          `INSERT OR IGNORE INTO outbox_sales (local_sale_id, client_sale_id, payload_json, synced, created_at)
+                           VALUES (?, ?, '{}', 1, ?);`,
+                          [saleId, clientSaleId, ts]
+                        );
+                      }
+                      
+                      resolve(saleId);
+                    },
+                    (_,_e)=>{ firstError = firstError || _e; return true; }
+                  );
+                }
+              }
+            );
+          }
+        );
+      } else {
+        // Comportamiento original si no hay client_sale_id
+        tx.executeSql(
+          query,
+          params,
+          (_checkTx, checkRes) => {
+            if (checkRes.rows.length > 0) {
+              const existing = checkRes.rows.item(0);
+              // Si existe, verificamos si necesitamos actualizar el comprobante
+              if (transferUri && existing.transfer_receipt_uri !== transferUri) {
+                console.log(`🔄 Actualizando comprobante para venta existente id=${existing.id}`);
+                tx.executeSql(
+                  `UPDATE sales SET transfer_receipt_uri = ?, transfer_receipt_name = ?, cloud_id = ? WHERE id = ?;`,
+                  [transferUri, transferName, cloudId, existing.id],
+                  () => {
+                    console.log(`✅ Comprobante actualizado para venta ${existing.id}`);
+                  },
+                  (_, err) => console.warn('Error actualizando comprobante:', err)
+                );
+              } else if (cloudId && !existing.cloud_id) {
+                 // Vincular cloud_id si falta
+                 tx.executeSql(`UPDATE sales SET cloud_id = ? WHERE id = ?;`, [cloudId, existing.id]);
+              }
+              
+              resolve(existing.id);
+              return;
             }
             
-            resolve(existing.id);
-            return;
-          }
-          
-          // No existe, proceder con la inserción
-          tx.executeSql(
-            `INSERT INTO sales (ts,total,payment_method,cash_received,change_given,discount,tax,notes,transfer_receipt_uri,transfer_receipt_name,voided,cloud_id)
-             VALUES (?,?,?,?,?,?,?,?,?,?,0,?);`,
-            [ts,total,payment,cashReceived,change,discount,tax,notes,transferUri,transferName,cloudId],
-            (_insert,res)=>{
-              const saleId = res.insertId;
-              console.log(`✅ Venta desde cloud insertada: saleId=${saleId}, ts=${ts}, total=${total}`);
-              
-              (items||[]).forEach(it=>{
-                const qty = Number(it.qty||0)||0;
-                const unit = Number(it.unit_price||0)||0;
-                const subtotal = qty*unit;
-                tx.executeSql(
-                  `INSERT INTO sale_items (sale_id,barcode,name,qty,unit_price,subtotal) VALUES (?,?,?,?,?,?);`,
-                  [saleId, String(it.barcode), it.name||null, qty, unit, subtotal],
-                  undefined,
-                  (_,_e)=>{ firstError = firstError || _e; return true; }
-                );
-                tx.executeSql(
-                  `UPDATE products SET stock = CASE WHEN IFNULL(stock,0) - ? < 0 THEN 0 ELSE IFNULL(stock,0) - ? END, updated_at = ? WHERE barcode = ?;`,
-                  [qty,qty,ts,String(it.barcode)],
-                  undefined,
-                  (_,_e)=>{ firstError = firstError || _e; return true; }
-                );
-              });
-            },
-            (_,_e)=>{ firstError = firstError || _e; return true; }
-          );
-        },
-        (_,_e)=>{ firstError = firstError || _e; return true; }
-      );
-    }, (txErr)=> reject(firstError||txErr), ()=> resolve(true) );
+            // No existe, proceder con la inserción
+            tx.executeSql(
+              `INSERT INTO sales (ts,total,payment_method,cash_received,change_given,discount,tax,notes,transfer_receipt_uri,transfer_receipt_name,voided,cloud_id)
+               VALUES (?,?,?,?,?,?,?,?,?,?,0,?);`,
+              [ts,total,payment,cashReceived,change,discount,tax,notes,transferUri,transferName,cloudId],
+              (_insert,res)=>{
+                const saleId = res.insertId;
+                console.log(`✅ Venta desde cloud insertada: saleId=${saleId}, ts=${ts}, total=${total}`);
+                
+                (items||[]).forEach(it=>{
+                  const qty = Number(it.qty||0)||0;
+                  const unit = Number(it.unit_price||0)||0;
+                  const subtotal = qty*unit;
+                  tx.executeSql(
+                    `INSERT INTO sale_items (sale_id,barcode,name,qty,unit_price,subtotal) VALUES (?,?,?,?,?,?);`,
+                    [saleId, String(it.barcode), it.name||null, qty, unit, subtotal],
+                    undefined,
+                    (_,_e)=>{ firstError = firstError || _e; return true; }
+                  );
+                  tx.executeSql(
+                    `UPDATE products SET stock = CASE WHEN IFNULL(stock,0) - ? < 0 THEN 0 ELSE IFNULL(stock,0) - ? END, updated_at = ? WHERE barcode = ?;`,
+                    [qty,qty,ts,String(it.barcode)],
+                    undefined,
+                    (_,_e)=>{ firstError = firstError || _e; return true; }
+                  );
+                });
+                resolve(saleId);
+              },
+              (_,_e)=>{ firstError = firstError || _e; return true; }
+            );
+          },
+          (_,_e)=>{ firstError = firstError || _e; return true; }
+        );
+      }
+    }, (txErr)=> reject(firstError||txErr) ); // Removed resolve(true) here because we resolve inside
   });
 }
 

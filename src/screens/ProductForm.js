@@ -44,6 +44,7 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
   const [suppliers, setSuppliers] = useState([]);
   const [catOpen, setCatOpen] = useState(false);
   const [supplierOpen, setSupplierOpen] = useState(false);
+  const [unitOpen, setUnitOpen] = useState(false);
   const [catSearch, setCatSearch] = useState('');
   const [pickExp, setPickExp] = useState(false);
 
@@ -308,16 +309,6 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
                 />
               </Field>
             </View>
-            <View style={{ flex: 1 }}>
-              <Field label="Neto (Calculado)">
-                <TextInput 
-                  style={[styles.input, { backgroundColor: '#f1f1f1', color: '#666' }]} 
-                  value={String(salePrice)} 
-                  editable={false} 
-                  placeholder="0" 
-                />
-              </Field>
-            </View>
           </View>
         </View>
 
@@ -351,7 +342,16 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
             <View style={{ flexDirection: 'row', gap: 10 }}>
               <View style={{ flex: 1 }}>
                 <Field label="Unidad Medida">
-                  <TextInput style={styles.input} value={measurementUnit} onChangeText={setMeasurementUnit} placeholder="un, kg, lt..." />
+                  <TouchableOpacity style={styles.select} onPress={() => setUnitOpen(true)}>
+                    <Text style={{ color: measurementUnit ? theme.colors.text : '#999' }}>
+                      {measurementUnit === 'un' ? 'Unidad (un)' : 
+                       measurementUnit === 'kg' ? 'Kilogramo (kg)' :
+                       measurementUnit === 'g' ? 'Gramo (g)' :
+                       measurementUnit === 'lt' ? 'Litro (lt)' :
+                       measurementUnit === 'ml' ? 'Mililitro (ml)' :
+                       measurementUnit || 'Elegir...'}
+                    </Text>
+                  </TouchableOpacity>
                 </Field>
               </View>
               <View style={{ flex: 1 }}>
@@ -456,6 +456,45 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
           <View style={{ padding: 16 }}>
             <TouchableOpacity style={[styles.btn, styles.btnGhost]} onPress={() => setSupplierOpen(false)}>
               <Text style={[styles.btnText, { color: '#333' }]}>Cerrar</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Selector de Unidad de Medida */}
+      <Modal visible={unitOpen} animationType="slide" onRequestClose={() => setUnitOpen(false)}>
+        <View style={{ flex: 1, backgroundColor: '#fff' }}>
+          <View style={{ padding: 16, borderBottomWidth: 1, borderColor: theme.colors.divider }}>
+            <Text style={{ fontSize: 18, fontWeight: '700' }}>Unidad de Medida</Text>
+            <Text style={{ color: '#666', marginTop: 2 }}>Selecciona la unidad de venta</Text>
+          </View>
+          <ScrollView contentContainerStyle={{ padding: 16 }}>
+            {/*
+              { code: 'un', label: 'Unidad (un)' },
+              { code: 'kg', label: 'Kilogramo (kg)' },
+              { code: 'g', label: 'Gramo (g)' },
+              { code: 'lt', label: 'Litro (lt)' },
+              { code: 'ml', label: 'Mililitro (ml)' },
+            */}
+            {[
+              { code: 'un', label: 'Unidad (un)' },
+              { code: 'kg', label: 'Kilogramo (kg)' },
+              { code: 'g', label: 'Gramo (g)' },
+              { code: 'lt', label: 'Litro (lt)' },
+              { code: 'ml', label: 'Mililitro (ml)' },
+            ].map((u) => (
+              <TouchableOpacity 
+                key={u.code} 
+                style={[styles.catItem, measurementUnit === u.code && { backgroundColor: '#e8f5e9', borderColor: '#2e7d32' }]} 
+                onPress={() => { setMeasurementUnit(u.code); setUnitOpen(false); }}
+              >
+                <Text style={{ fontWeight: '600', fontSize: 16 }}>{u.label}</Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+          <View style={{ padding: 16 }}>
+            <TouchableOpacity style={[styles.btn, styles.btnGhost]} onPress={() => setUnitOpen(false)}>
+              <Text style={[styles.btnText, { color: '#333' }]}>Cancelar</Text>
             </TouchableOpacity>
           </View>
         </View>

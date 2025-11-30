@@ -445,6 +445,7 @@ export async function pullSales({ sinceTs } = {}) {
           transfer_receipt_uri: s.transfer_receipt_uri || null,  // 🆕 Sincronizar comprobantes desde otros dispositivos
           transfer_receipt_name: s.transfer_receipt_name || null, // 🆕 Sincronizar nombre del comprobante
           cloud_id: s.id, // 🆕 Guardar ID de nube
+          client_sale_id: s.client_sale_id || null, // 🆕 Pasar client_sale_id para evitar duplicados
           items,
         });
         
