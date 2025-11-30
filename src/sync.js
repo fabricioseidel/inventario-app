@@ -374,7 +374,7 @@ export async function pullSales({ sinceTs } = {}) {
     .select('*')
     .gt('ts', thirtyDaysAgo)
     .not('transfer_receipt_uri', 'is', null) // Solo las que tienen comprobante
-    .neq('device_id', deviceId)
+    // .neq('device_id', deviceId) // 🔧 COMENTADO: Permitir descargar mis propias ventas si tienen comprobante (para actualizar)
     .limit(200);
     
   if (errorReceipts) {

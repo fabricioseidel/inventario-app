@@ -20,8 +20,14 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
   const [barcode, setBarcode] = useState(initial?.barcode || '');
   const [name, setName] = useState(initial?.name || '');
   const [category, setCategory] = useState(initial?.category || '');
-  const [purchasePrice, setPurchasePrice] = useState(initial?.purchasePrice || '');
-  const [salePrice, setSalePrice] = useState(initial?.salePrice || '');
+  
+  // Precios
+  const [purchasePrice, setPurchasePrice] = useState(initial?.purchasePrice || ''); // Neto
+  const [purchasePriceTax, setPurchasePriceTax] = useState(''); // Con IVA
+  const [suggestedPrice, setSuggestedPrice] = useState(''); // Sugerido
+  const [salePrice, setSalePrice] = useState(initial?.salePrice || ''); // Neto (BD)
+  const [salePriceTax, setSalePriceTax] = useState(''); // Con IVA (Input Usuario)
+
   const [expiryDate, setExpiryDate] = useState(initial?.expiryDate || '');
   const [stock, setStock] = useState(initial?.stock || '');
   const [soldByWeight, setSoldByWeight] = useState(initial?.sold_by_weight ? true : false);
@@ -32,7 +38,6 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
   const [measurementValue, setMeasurementValue] = useState(String(initial?.measurement_value ?? '1'));
   const [supplierId, setSupplierId] = useState(initial?.supplier_id || null);
   const [taxRate, setTaxRate] = useState(String(initial?.tax_rate ?? '19'));
-  const [priceWithTax, setPriceWithTax] = useState(''); // Calculado
   const [showAdvanced, setShowAdvanced] = useState(false);
 
   const [cats, setCats] = useState([]);
@@ -41,6 +46,9 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
   const [supplierOpen, setSupplierOpen] = useState(false);
   const [catSearch, setCatSearch] = useState('');
   const [pickExp, setPickExp] = useState(false);
+
+  // Refs
+  const nameRef = React.useRef(null);
 
   useEffect(() => {
     (async () => { 
@@ -51,23 +59,60 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
     })();
   }, []);
 
-  // Calcular precio con IVA al cargar o cambiar precio neto
+  // Inicializar valores calculados al cargar
   useEffect(() => {
-    if (salePrice && taxRate) {
-      const net = Number(salePrice);
-      const rate = Number(taxRate) / 100;
-      const withTax = net * (1 + rate);
-      setPriceWithTax(withTax.toFixed(0));
+    const rate = 1 + (Number(taxRate || 19) / 100);
+    
+    // Purchase Price
+    if (purchasePrice && !purchasePriceTax) {
+      const gross = Number(purchasePrice) * rate;
+      setPurchasePriceTax(gross.toFixed(0));
+      setSuggestedPrice((gross / 0.65).toFixed(0));
     }
-  }, [salePrice, taxRate]);
 
-  const handlePriceWithTaxChange = (val) => {
-    setPriceWithTax(val);
-    if (val && taxRate) {
-      const gross = Number(val);
-      const rate = Number(taxRate) / 100;
-      const net = gross / (1 + rate);
+    // Sale Price
+    if (salePrice && !salePriceTax) {
+      const gross = Number(salePrice) * rate;
+      setSalePriceTax(gross.toFixed(0));
+    }
+  }, []); // Solo al montar o si cambian las props iniciales (que no cambian)
+
+  // Manejadores de Precio Compra
+  const handlePurchasePriceChange = (val) => {
+    setPurchasePrice(val);
+    if (val) {
+      const rate = 1 + (Number(taxRate || 19) / 100);
+      const gross = Number(val) * rate;
+      setPurchasePriceTax(gross.toFixed(0));
+      setSuggestedPrice((gross / 0.65).toFixed(0));
+    } else {
+      setPurchasePriceTax('');
+      setSuggestedPrice('');
+    }
+  };
+
+  const handlePurchasePriceTaxChange = (val) => {
+    setPurchasePriceTax(val);
+    if (val) {
+      const rate = 1 + (Number(taxRate || 19) / 100);
+      const net = Number(val) / rate;
+      setPurchasePrice(net.toFixed(0));
+      setSuggestedPrice((Number(val) / 0.65).toFixed(0));
+    } else {
+      setPurchasePrice('');
+      setSuggestedPrice('');
+    }
+  };
+
+  // Manejadores de Precio Venta
+  const handleSalePriceTaxChange = (val) => {
+    setSalePriceTax(val);
+    if (val) {
+      const rate = 1 + (Number(taxRate || 19) / 100);
+      const net = Number(val) / rate;
       setSalePrice(net.toFixed(0));
+    } else {
+      setSalePrice('');
     }
   };
 
@@ -102,7 +147,9 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
       measurementValue: Number(measurementValue || 0),
       supplierId,
       taxRate: Number(taxRate || 19),
-      isActive: 1
+      isActive: 1,
+      suggestedPrice: Number(suggestedPrice || 0), // Guardar sugerido si existe columna, sino se ignora
+      offerPrice: 0 // Por ahora 0
     };
     if (!payload.barcode) return Alert.alert('Falta código', 'El código de barras es obligatorio.');
     if (!payload.salePrice && !payload.purchasePrice) {
@@ -145,8 +192,19 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
             { text: 'Sí, cargar', onPress: () => {
                 setName(existing.name || '');
                 setCategory(existing.category || '');
-                setPurchasePrice(String(existing.purchase_price ?? ''));
-                setSalePrice(String(existing.sale_price ?? ''));
+                
+                // Cargar precios
+                const rate = 1 + (Number(existing.tax_rate || 19) / 100);
+                const pPrice = Number(existing.purchase_price || 0);
+                const sPrice = Number(existing.sale_price || 0);
+                
+                setPurchasePrice(String(pPrice));
+                setPurchasePriceTax((pPrice * rate).toFixed(0));
+                setSuggestedPrice(((pPrice * rate) / 0.65).toFixed(0));
+                
+                setSalePrice(String(sPrice));
+                setSalePriceTax((sPrice * rate).toFixed(0));
+
                 setExpiryDate(existing.expiry_date || '');
                 setStock(String(existing.stock ?? ''));
                 setSoldByWeight(existing.sold_by_weight ? true : false);
@@ -190,12 +248,23 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
             onChangeText={setBarcode} 
             placeholder="Ej: 7800000000001" 
             keyboardType="numeric" 
-            onBlur={checkExistingBarcode}
+            autoFocus={true}
+            blurOnSubmit={false}
+            onSubmitEditing={() => {
+               checkExistingBarcode();
+               nameRef.current?.focus();
+            }}
           />
         </Field>
 
         <Field label="Nombre">
-          <TextInput style={styles.input} value={name} onChangeText={setName} placeholder="Ej: Coca-Cola 1.5L" />
+          <TextInput 
+            ref={nameRef}
+            style={styles.input} 
+            value={name} 
+            onChangeText={setName} 
+            placeholder="Ej: Coca-Cola 1.5L" 
+          />
         </Field>
 
         <Field label="Categoría">
@@ -204,16 +273,51 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
           </TouchableOpacity>
         </Field>
 
-        <View style={{ flexDirection: 'row', gap: 10 }}>
-          <View style={{ flex: 1 }}>
-            <Field label="Precio Neto (Sin IVA)">
-              <TextInput style={styles.input} value={String(salePrice)} onChangeText={setSalePrice} placeholder="0" keyboardType="numeric" />
-            </Field>
+        {/* Sección de Precios de Compra */}
+        <View style={{ backgroundColor: '#f0f8ff', padding: 10, borderRadius: 8, marginBottom: 12 }}>
+          <Text style={{ fontWeight: 'bold', marginBottom: 8, color: '#0056b3' }}>Costos y Sugeridos</Text>
+          <View style={{ flexDirection: 'row', gap: 10 }}>
+            <View style={{ flex: 1 }}>
+              <Field label="Costo Neto">
+                <TextInput style={styles.input} value={String(purchasePrice)} onChangeText={handlePurchasePriceChange} placeholder="0" keyboardType="numeric" />
+              </Field>
+            </View>
+            <View style={{ flex: 1 }}>
+              <Field label={`Costo + IVA (${taxRate}%)`}>
+                <TextInput style={styles.input} value={String(purchasePriceTax)} onChangeText={handlePurchasePriceTaxChange} placeholder="0" keyboardType="numeric" />
+              </Field>
+            </View>
           </View>
-          <View style={{ flex: 1 }}>
-            <Field label={`Precio Venta (IVA ${taxRate}%)`}>
-              <TextInput style={[styles.input, { backgroundColor: '#f9f9f9' }]} value={String(priceWithTax)} onChangeText={handlePriceWithTaxChange} placeholder="0" keyboardType="numeric" />
-            </Field>
+          <View style={{ marginTop: 4 }}>
+             <Text style={{ fontSize: 12, color: '#666' }}>Precio Sugerido (Margen ~35%): <Text style={{ fontWeight: 'bold', color: '#000' }}>${suggestedPrice || '0'}</Text></Text>
+          </View>
+        </View>
+
+        {/* Sección de Precio de Venta */}
+        <View style={{ backgroundColor: '#e8f5e9', padding: 10, borderRadius: 8, marginBottom: 12 }}>
+          <Text style={{ fontWeight: 'bold', marginBottom: 8, color: '#2e7d32' }}>Precio de Venta Final</Text>
+          <View style={{ flexDirection: 'row', gap: 10 }}>
+            <View style={{ flex: 1 }}>
+              <Field label={`Precio Venta (Con IVA)`}>
+                <TextInput 
+                  style={[styles.input, { backgroundColor: '#fff', borderColor: '#2e7d32', borderWidth: 2 }]} 
+                  value={String(salePriceTax)} 
+                  onChangeText={handleSalePriceTaxChange} 
+                  placeholder="0" 
+                  keyboardType="numeric" 
+                />
+              </Field>
+            </View>
+            <View style={{ flex: 1 }}>
+              <Field label="Neto (Calculado)">
+                <TextInput 
+                  style={[styles.input, { backgroundColor: '#f1f1f1', color: '#666' }]} 
+                  value={String(salePrice)} 
+                  editable={false} 
+                  placeholder="0" 
+                />
+              </Field>
+            </View>
           </View>
         </View>
 
@@ -224,9 +328,7 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
             </Field>
           </View>
           <View style={{ flex: 1 }}>
-            <Field label="Precio compra (Neto)">
-              <TextInput style={styles.input} value={String(purchasePrice)} onChangeText={setPurchasePrice} placeholder="0" keyboardType="numeric" />
-            </Field>
+             {/* Espacio libre o para otro campo */}
           </View>
         </View>
 
@@ -273,6 +375,10 @@ export default function ProductForm({ initial, onSaved, onCancel }) {
                 </Field>
               </View>
             </View>
+            
+            <Field label="Impuesto (%)">
+               <TextInput style={styles.input} value={taxRate} onChangeText={setTaxRate} keyboardType="numeric" placeholder="19" />
+            </Field>
           </View>
         )}
 

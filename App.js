@@ -173,14 +173,21 @@ export default function App() {
     await loadProductCount();
   }, [loadProductCount, search, searchProducts]);
 
-  // Handler del TextInput
+  const searchTimeoutRef = React.useRef(null);
+
+  // Handler del TextInput con Debounce
   const handleSearchChange = useCallback((newSearch) => {
     setSearch(newSearch);
-    if (newSearch.trim().length === 0) {
-      searchProducts('');
-      return;
-    }
-    searchProducts(newSearch);
+    
+    if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
+    
+    searchTimeoutRef.current = setTimeout(() => {
+      if (newSearch.trim().length === 0) {
+        searchProducts('');
+        return;
+      }
+      searchProducts(newSearch);
+    }, 300);
   }, [searchProducts]);
 
 
