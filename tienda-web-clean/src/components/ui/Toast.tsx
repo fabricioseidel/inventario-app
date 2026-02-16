@@ -25,42 +25,14 @@ const Toast = ({ type = "info", message, show, onClose, duration = 3000 }: Toast
   const getIcon = () => {
     switch (type) {
       case "success":
-        return <CheckCircleIcon className="h-6 w-6 text-green-400" aria-hidden="true" />;
+        return <CheckCircleIcon className="h-6 w-6 text-green-500" aria-hidden="true" />;
       case "error":
-        return <ExclamationCircleIcon className="h-6 w-6 text-red-400" aria-hidden="true" />;
+        return <ExclamationCircleIcon className="h-6 w-6 text-red-500" aria-hidden="true" />;
       case "warning":
-        return <ExclamationCircleIcon className="h-6 w-6 text-yellow-400" aria-hidden="true" />;
+        return <ExclamationCircleIcon className="h-6 w-6 text-yellow-500" aria-hidden="true" />;
       case "info":
       default:
-        return <CheckCircleIcon className="h-6 w-6 text-blue-400" aria-hidden="true" />;
-    }
-  };
-
-  const getBgColor = () => {
-    switch (type) {
-      case "success":
-        return "bg-green-50";
-      case "error":
-        return "bg-red-50";
-      case "warning":
-        return "bg-yellow-50";
-      case "info":
-      default:
-        return "bg-blue-50";
-    }
-  };
-
-  const getBorderColor = () => {
-    switch (type) {
-      case "success":
-        return "border-green-200";
-      case "error":
-        return "border-red-200";
-      case "warning":
-        return "border-yellow-200";
-      case "info":
-      default:
-        return "border-blue-200";
+        return <CheckCircleIcon className="h-6 w-6 text-blue-500" aria-hidden="true" />;
     }
   };
 
@@ -75,20 +47,20 @@ const Toast = ({ type = "info", message, show, onClose, duration = 3000 }: Toast
       leaveFrom="opacity-100"
       leaveTo="opacity-0"
     >
-      <div className={`max-w-sm w-full ${getBgColor()} border ${getBorderColor()} shadow-lg rounded-lg pointer-events-auto ring-1 ring-black ring-opacity-5 overflow-hidden`}>
-        <div className="p-4">
-          <div className="flex items-start">
+      <div className="max-w-xs w-auto bg-white shadow-lg rounded-lg pointer-events-auto ring-1 ring-black ring-opacity-5 overflow-hidden hover:shadow-md transition-all">
+        <div className="p-3">
+          <div className="flex items-center gap-3">
             <div className="flex-shrink-0">{getIcon()}</div>
-            <div className="ml-3 w-0 flex-1 pt-0.5">
-              <p className="text-sm font-medium text-gray-900">{message}</p>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium text-gray-900 truncate">{message}</p>
             </div>
-            <div className="ml-4 flex-shrink-0 flex">
+            <div className="flex-shrink-0">
               <button
-                className="bg-transparent rounded-md inline-flex text-gray-400 hover:text-gray-500 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                className="bg-transparent rounded-md p-1 inline-flex text-gray-400 hover:text-gray-500 focus:outline-none hover:bg-gray-50"
                 onClick={onClose}
               >
                 <span className="sr-only">Cerrar</span>
-                <XMarkIcon className="h-5 w-5" aria-hidden="true" />
+                <XMarkIcon className="h-4 w-4" aria-hidden="true" />
               </button>
             </div>
           </div>

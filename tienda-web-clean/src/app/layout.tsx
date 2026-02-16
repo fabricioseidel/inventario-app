@@ -3,9 +3,9 @@ import type { Metadata } from "next";
 import React from "react";
 
 import Providers from "./providers";
+import Footer from "@/components/layout/Footer";
 import Navbar from "@/components/layout/Navbar";
-
-// 👉 ajusta estos imports si tus paths de contextos son distintos
+import { SettingsInjector } from "@/components/admin/SettingsInjector";
 import { ProductProvider } from "@/contexts/ProductContext";
 import { CategoryProvider } from "@/contexts/CategoryContext";
 
@@ -19,6 +19,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="es" className="h-full">
       <body className="h-full bg-gray-50">
         <Providers>
+          <SettingsInjector />
           <ProductProvider>
             <CategoryProvider>
               <div className="min-h-screen flex flex-col">
@@ -26,6 +27,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                   <Navbar />
                 </header>
                 <main className="flex-1 bg-white">{children}</main>
+                <Footer />
               </div>
             </CategoryProvider>
           </ProductProvider>

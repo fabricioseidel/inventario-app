@@ -36,31 +36,33 @@ export default function PedidosPage() {
     if (status === "unauthenticated") {
       router.push("/login?callbackUrl=/mi-cuenta/pedidos");
     } else if (status === "authenticated") {
-      const userEmail = session?.user?.email;
-      const raw = typeof window !== 'undefined' ? localStorage.getItem('orders') : null;
-      let saved: Pedido[] = [];
-      if (raw) {
+      const fetchOrders = async () => {
         try {
-          const arr = JSON.parse(raw);
-          if (Array.isArray(arr)) {
-            saved = arr.map((o: any): Pedido => ({
-              id: o.id,
-              fecha: (o.fecha || o.date || '').toString().split('T')[0] || '-',
-              total: Number(o.total) || 0,
-              estado: o.estado || o.status || 'En proceso',
-              productos: o.productos || (Array.isArray(o.items) ? o.items.reduce((s: number, it: any) => s + (Number(it.quantity)||0), 0) : 0),
-              email: o.email,
-              customer: o.customer,
-              userId: o.userId
-            }));
+          const res = await fetch('/api/orders');
+          if (res.ok) {
+            const data = await res.json();
+            if (Array.isArray(data)) {
+               const normalized: Pedido[] = data.map((o: any) => ({
+                 id: o.id,
+                 fecha: (o.created_at || o.date || '').toString().split('T')[0],
+                 total: Number(o.total) || 0,
+                 estado: o.status || 'Pendiente',
+                 productos: o.items_count || 0,
+                 email: o.shipping_address?.email,
+                 customer: o.shipping_address?.fullName,
+                 userId: o.user_id
+               }));
+               setPedidos(normalized);
+               setFilteredPedidos(normalized);
+            }
           }
-        } catch {}
-      }
-      // Filtrar solo pedidos del usuario (por email o userId)
-      const own = saved.filter(p => !userEmail || p.email === userEmail);
-      setPedidos(own);
-      setFilteredPedidos(own);
-      setIsLoading(false);
+        } catch (error) {
+          console.error("Error fetching orders", error);
+        } finally {
+          setIsLoading(false);
+        }
+      };
+      fetchOrders();
     } else {
       // Modo demo: mostrar pedidos de ejemplo
       const exampleOrders = [

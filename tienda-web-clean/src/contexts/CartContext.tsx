@@ -1,17 +1,8 @@
 "use client";
 
 import React from 'react';
-import { createContext, useContext, useState, useEffect, ReactNode } from "react";
-
-// Definición de tipos
-export interface CartItem {
-  id: string;
-  name: string;
-  price: number;
-  image: string;
-  slug: string;
-  quantity: number;
-}
+import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from "react";
+import { CartItem } from '@/types';
 
 interface CartContextType {
   cartItems: CartItem[];
@@ -93,7 +84,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
   const itemCount = cartItems.reduce((count, item) => count + item.quantity, 0);
   
   // Agregar producto al carrito
-  const addToCart = (product: Omit<CartItem, "quantity">, quantity: number = 1) => {
+  const addToCart = useCallback((product: Omit<CartItem, "quantity">, quantity: number = 1) => {
     const qty = Math.max(1, Math.floor(quantity || 1));
     setCartItems(prevItems => {
       const existingItem = prevItems.find(item => item.id === product.id);
@@ -105,28 +96,28 @@ export function CartProvider({ children }: { children: ReactNode }) {
         return [...prevItems, { ...product, quantity: qty }];
       }
     });
-  };
+  }, []);
   
   // Eliminar producto del carrito
-  const removeFromCart = (id: string) => {
+  const removeFromCart = useCallback((id: string) => {
     setCartItems(prevItems => prevItems.filter(item => item.id !== id));
-  };
+  }, []);
   
   // Actualizar cantidad de un producto
-  const updateQuantity = (id: string, quantity: number) => {
+  const updateQuantity = useCallback((id: string, quantity: number) => {
     if (quantity < 1) return;
     
     setCartItems(prevItems =>
       prevItems.map(item => (item.id === id ? { ...item, quantity } : item))
     );
-  };
+  }, []);
   
   // Vaciar carrito
-  const clearCart = () => {
+  const clearCart = useCallback(() => {
     setCartItems([]);
     localStorage.removeItem('cart');
     localStorage.removeItem('cartItems');
-  };
+  }, []);
   
   // Valores del contexto
   const contextValue: CartContextType = {

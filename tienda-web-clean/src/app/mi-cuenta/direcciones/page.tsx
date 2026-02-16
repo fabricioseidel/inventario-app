@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeftIcon, PlusIcon, PencilIcon, TrashIcon } from "@heroicons/react/24/outline";
+import AddressAutocomplete, { AddressResult } from "@/components/AddressAutocomplete";
 
 // Tipo para las direcciones
 type Direccion = {
@@ -13,7 +14,7 @@ type Direccion = {
   calle: string;
   numero: string;
   interior?: string;
-  colonia: string;
+  colonia: string; // Se mantiene el nombre interno pero se mostrará como Comuna
   ciudad: string;
   estado: string;
   codigoPostal: string;
@@ -83,27 +84,27 @@ export default function DireccionesPage() {
         {
           id: "addr-001",
           nombre: "Casa",
-          calle: "Av. Insurgentes Sur",
+          calle: "Av. Providencia",
           numero: "1234",
-          interior: "Apt 5B",
-          colonia: "Roma Norte",
-          ciudad: "Ciudad de México",
-          estado: "Ciudad de México",
-          codigoPostal: "06700",
-          telefono: "555-123-4567",
+          interior: "Depto 502",
+          colonia: "Providencia",
+          ciudad: "Santiago",
+          estado: "Región Metropolitana",
+          codigoPostal: "7500000",
+          telefono: "9 1234 5678",
           predeterminada: true
         },
         {
           id: "addr-002",
           nombre: "Oficina",
-          calle: "Paseo de la Reforma",
-          numero: "567",
-          interior: "Piso 10",
-          colonia: "Juárez",
-          ciudad: "Ciudad de México",
-          estado: "Ciudad de México",
-          codigoPostal: "06600",
-          telefono: "555-987-6543",
+          calle: "Av. Apoquindo",
+          numero: "4500",
+          interior: "Piso 15",
+          colonia: "Las Condes",
+          ciudad: "Santiago",
+          estado: "Región Metropolitana",
+          codigoPostal: "7550000",
+          telefono: "9 8765 4321",
           predeterminada: false
         }
       ]);
@@ -120,6 +121,83 @@ export default function DireccionesPage() {
       [name]: type === "checkbox" ? checked : value
     }));
   };
+
+  const handleAddressSelect = useCallback((val: AddressResult | string) => {
+    if (typeof val === 'string') {
+      setFormData(prev => ({ ...prev, calle: val }));
+    } else {
+      // Extract street and number if available, otherwise fallback to formatted address
+      let street = val.street || "";
+      let streetNumber = val.streetNumber || "";
+      
+      // Fallback if components are missing
+      if (!street) {
+          const parts = val.formattedAddress.split(',').map(p => p.trim());
+          if (parts.length > 0) {
+              const first = parts[0];
+              // Check if first part is just a number (e.g. "2456, Los Olmos...")
+              if (/^\d+$/.test(first)) {
+                  if (!streetNumber) streetNumber = first;
+                  if (parts.length > 1) street = parts[1]; 
+              } else {
+                  // Check for "Street 123" or "Street #123"
+                  const matchSuffix = first.match(/^(.+?)\s+(?:#|No\.?)?\s*(\d+)$/i);
+                  // Check for "123 Street" or "#123 Street"
+                  const matchPrefix = first.match(/^(?:#|No\.?)?\s*(\d+)\s+(.+)$/i);
+                  
+                  if (matchSuffix) {
+                      street = matchSuffix[1];
+                      if (!streetNumber) streetNumber = matchSuffix[2];
+                  } else if (matchPrefix) {
+                      if (!streetNumber) streetNumber = matchPrefix[1];
+                      street = matchPrefix[2];
+                  } else {
+                      street = first;
+                      // Try to extract number from street if we still don't have one
+                      if (!streetNumber) {
+                          const matchAnyNumber = first.match(/(\d+)/);
+                          if (matchAnyNumber) {
+                              streetNumber = matchAnyNumber[1];
+                              // Remove the number and common prefixes from the street name
+                              street = first.replace(streetNumber, '').replace(/#|No\.|Num\./i, '').trim();
+                              // Clean up any trailing/leading non-alphanumeric chars (like commas if they were missed)
+                              street = street.replace(/^[\s,.-]+|[\s,.-]+$/g, '');
+                          }
+                      }
+                  }
+              }
+          }
+      }
+
+      // In Chile:
+      // val.city (locality) -> Comuna (e.g. Macul)
+      // val.state (admin_area_1) -> Region (e.g. RM)
+      // We need to find "Ciudad" (Province or just Santiago). 
+      // Often Google returns "Santiago" as admin_area_2 or locality.
+      
+      setFormData(prev => ({
+        ...prev,
+        calle: street,
+        numero: streetNumber,
+        interior: "", // Reset interior as it's usually not in autocomplete
+        ciudad: "Santiago", // Default for RM, or try to extract better if possible
+        colonia: val.district || val.city || prev.colonia, // Comuna: Prefer district (admin_area_3)
+        estado: val.state || prev.estado, // Region
+        codigoPostal: val.postalCode || prev.codigoPostal
+      }));
+      
+      // Refine mapping if we have more info
+      if (val.state && val.state.includes("Metropolitana")) {
+          setFormData(prev => ({ ...prev, ciudad: "Santiago" }));
+      } else if (val.city && val.city !== val.district) {
+          // If city is different from district (e.g. City=Concepcion, District=Concepcion), use city
+          // If City=Provincia de Santiago, ignore it
+          if (!val.city.includes("Provincia")) {
+             setFormData(prev => ({ ...prev, ciudad: val.city || "" }));
+          }
+      }
+    }
+  }, []);
 
   const handleAgregar = () => {
     setDireccionActual(null);
@@ -360,13 +438,11 @@ export default function DireccionesPage() {
                 <label htmlFor="calle" className="block text-sm font-medium text-gray-700 mb-1">
                   Calle
                 </label>
-                <input
-                  type="text"
-                  id="calle"
-                  name="calle"
+                <AddressAutocomplete
                   value={formData.calle}
-                  onChange={handleChange}
-                  className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                  onChange={handleAddressSelect}
+                  placeholder="Ingresa tu dirección"
+                  country="cl"
                   required
                 />
               </div>
@@ -402,7 +478,7 @@ export default function DireccionesPage() {
               
               <div>
                 <label htmlFor="colonia" className="block text-sm font-medium text-gray-700 mb-1">
-                  Colonia
+                  Comuna
                 </label>
                 <input
                   type="text"
@@ -447,7 +523,7 @@ export default function DireccionesPage() {
               
               <div>
                 <label htmlFor="estado" className="block text-sm font-medium text-gray-700 mb-1">
-                  Estado
+                  Región
                 </label>
                 <input
                   type="text"
@@ -526,10 +602,10 @@ export default function DireccionesPage() {
                         {direccion.interior && `, Int. ${direccion.interior}`}
                       </p>
                       <p className="text-sm text-gray-700">
-                        {direccion.colonia}, {direccion.codigoPostal}
+                        {direccion.colonia}, {direccion.ciudad}
                       </p>
                       <p className="text-sm text-gray-700">
-                        {direccion.ciudad}, {direccion.estado}
+                        {direccion.estado}, {direccion.codigoPostal}
                       </p>
                       <p className="text-sm text-gray-700 mt-1">
                         Tel: {direccion.telefono}

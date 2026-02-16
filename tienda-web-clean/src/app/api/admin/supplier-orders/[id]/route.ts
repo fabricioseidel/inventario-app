@@ -65,8 +65,8 @@ export async function GET(
       };
     });
 
-    const supplierName = Array.isArray(order.suppliers) 
-      ? order.suppliers[0]?.name 
+    const supplierName = Array.isArray(order.suppliers)
+      ? order.suppliers[0]?.name
       : order.suppliers?.name || 'Proveedor desconocido';
 
     const supplierWhatsapp = Array.isArray(order.suppliers)
@@ -119,7 +119,7 @@ export async function PATCH(
     const body = await request.json();
 
     const updates: any = {};
-    
+
     if (body.status) updates.status = body.status;
     if (body.payment_status) updates.payment_status = body.payment_status;
     if (body.paid_amount !== undefined) updates.paid_amount = body.paid_amount;
@@ -149,6 +149,66 @@ export async function PATCH(
       );
     }
 
+    // ===== ACTUALIZACIÓN AUTOMÁTICA DEL INVENTARIO =====
+    // Si el pedido pasa a "recibido", aumentar el stock
+    if (body.status === 'recibido') {
+      try {
+        // Obtener los items del pedido
+        const { data: orderItems } = await supabaseServer
+          .from('supplier_order_items')
+          .select('product_id, quantity')
+          .eq('order_id', id);
+
+        if (orderItems && orderItems.length > 0) {
+          // Actualizar el stock de cada producto
+          for (const item of orderItems) {
+            await supabaseServer.rpc('increment_product_stock', {
+              p_product_id: item.product_id,
+              p_quantity: item.quantity
+            });
+          }
+          console.log(`Inventario actualizado para pedido ${id}: +${orderItems.length} productos`);
+        }
+      } catch (invError) {
+        console.error('Error al actualizar inventario:', invError);
+        // No fallar la actualización del pedido por error en inventario
+      }
+    }
+
+    // Si el pedido es cancelado y estaba en "recibido", revertir el stock
+    if (body.status === 'cancelado') {
+      try {
+        // Verificar si el pedido estaba previamente en "recibido"
+        const { data: previousOrder } = await supabaseServer
+          .from('supplier_orders')
+          .select('status')
+          .eq('id', id)
+          .single();
+
+        if (previousOrder && previousOrder.status === 'recibido') {
+          // Obtener los items del pedido
+          const { data: orderItems } = await supabaseServer
+            .from('supplier_order_items')
+            .select('product_id, quantity')
+            .eq('order_id', id);
+
+          if (orderItems && orderItems.length > 0) {
+            // Revertir el stock de cada producto
+            for (const item of orderItems) {
+              await supabaseServer.rpc('decrement_product_stock', {
+                p_product_id: item.product_id,
+                p_quantity: item.quantity
+              });
+            }
+            console.log(`Inventario revertido para pedido cancelado ${id}`);
+          }
+        }
+      } catch (invError) {
+        console.error('Error al revertir inventario:', invError);
+      }
+    }
+
+
     // Obtener items actualizados
     const { data: items } = await supabaseServer
       .from('supplier_order_items')
@@ -177,8 +237,8 @@ export async function PATCH(
       };
     });
 
-    const supplierName = Array.isArray(data.suppliers) 
-      ? data.suppliers[0]?.name 
+    const supplierName = Array.isArray(data.suppliers)
+      ? data.suppliers[0]?.name
       : data.suppliers?.name || 'Proveedor desconocido';
 
     const supplierWhatsapp = Array.isArray(data.suppliers)

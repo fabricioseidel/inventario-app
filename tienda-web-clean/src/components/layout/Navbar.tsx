@@ -7,6 +7,7 @@ import { ShoppingCartIcon } from "@heroicons/react/24/outline";
 import { Bars3Icon, XMarkIcon } from "@heroicons/react/24/solid";
 import { useSession, signOut } from "next-auth/react";
 import ImageWithFallback from "@/components/ui/ImageWithFallback";
+import { useStoreSettings } from "@/hooks/useStoreSettings";
 import { Disclosure, Menu, Transition } from "@headlessui/react";
 import { useCart } from "@/contexts/CartContext";
 
@@ -26,6 +27,7 @@ const HIDE_ON = new Set<string>([
 
 export default function Navbar() {
   const { data: session, status } = useSession();
+  const { settings } = useStoreSettings();
   const pathname = usePathname();
   const { itemCount } = useCart();
 
@@ -81,8 +83,12 @@ export default function Navbar() {
               {/* Izquierda: logo + navegación */}
               <div className="flex">
                 <div className="flex-shrink-0 flex items-center">
-                  <Link href="/" className="text-xl font-bold text-blue-600">
-                    OLIVOMARKET
+                  <Link href="/" className="flex items-center gap-3">
+                    {settings.appearance?.logoUrl ? (
+                      <ImageWithFallback className="h-8 w-auto" src={settings.appearance.logoUrl} alt={settings.storeName || 'Tienda'} fallback="/logo.png" />
+                    ) : (
+                      <span className="text-xl font-bold text-primary">{settings.storeName || 'OLIVOMARKET'}</span>
+                    )}
                   </Link>
                 </div>
                 <div className="hidden sm:ml-6 sm:flex sm:space-x-8">
@@ -93,11 +99,10 @@ export default function Navbar() {
                         key={item.name}
                         href={item.href}
                         aria-current={active ? "page" : undefined}
-                        className={`inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium transition-colors ${
-                          active
-                            ? "border-blue-600 text-gray-900"
-                            : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
-                        }`}
+                        className={`inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium transition-colors ${active
+                          ? "border-primary text-gray-900"
+                          : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
+                          }`}
                       >
                         {item.name}
                       </Link>
@@ -115,7 +120,7 @@ export default function Navbar() {
                   <span className="sr-only">Carrito</span>
                   <ShoppingCartIcon className="h-6 w-6 flex-shrink-0" aria-hidden="true" />
                   {itemCount > 0 && (
-                    <span className="absolute -top-1 -right-1 bg-blue-600 text-white text-xs font-bold rounded-full h-5 w-5 flex items-center justify-center">
+                    <span className="absolute -top-1 -right-1 bg-primary text-white text-xs font-bold rounded-full h-5 w-5 flex items-center justify-center">
                       {itemCount}
                     </span>
                   )}
@@ -127,18 +132,18 @@ export default function Navbar() {
                 ) : session ? (
                   <Menu as="div" className="ml-3 relative">
                     <div>
-                      <Menu.Button className="bg-white rounded-full flex text-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
+                      <Menu.Button className="bg-white rounded-full flex text-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary">
                         <span className="sr-only">Abrir menú de usuario</span>
-                        <div className="h-8 w-8 rounded-full bg-blue-100 flex items-center justify-center overflow-hidden">
+                        <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center overflow-hidden">
                           {session.user?.image ? (
                             <ImageWithFallback
                               className="h-8 w-8 rounded-full object-cover"
                               src={session.user.image}
                               alt="Foto de perfil"
-                              fallback="/uploads/fallback.png"
+                              fallback="/file.svg"
                             />
                           ) : (
-                            <span className="text-blue-700 font-medium">
+                            <span className="text-primary font-medium">
                               {initial}
                             </span>
                           )}
@@ -181,7 +186,7 @@ export default function Navbar() {
                           <Menu.Item>
                             {({ active }) => (
                               <Link
-                                href="/admin"
+                                href="/dashboard"
                                 className={`${active ? "bg-gray-100" : ""} block px-4 py-2 text-sm text-gray-700`}
                               >
                                 Panel de Administración
@@ -213,7 +218,7 @@ export default function Navbar() {
                     </Link>
                     <Link
                       href="/registro"
-                      className="text-sm font-medium text-blue-600 hover:text-blue-500"
+                      className="text-sm font-medium text-primary hover:text-primary/80"
                     >
                       Registrarse
                     </Link>
@@ -223,7 +228,7 @@ export default function Navbar() {
 
               {/* Botón menú móvil */}
               <div className="-mr-2 flex items-center sm:hidden">
-                <Disclosure.Button className="inline-flex items-center justify-center p-2 rounded-md text-gray-400 hover:text-gray-500 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-blue-500">
+                <Disclosure.Button className="inline-flex items-center justify-center p-2 rounded-md text-gray-400 hover:text-gray-500 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-primary">
                   <span className="sr-only">Abrir menú principal</span>
                   {open ? (
                     <XMarkIcon className="block h-6 w-6 flex-shrink-0" aria-hidden="true" />
@@ -245,11 +250,10 @@ export default function Navbar() {
                     key={item.name}
                     href={item.href}
                     aria-current={active ? "page" : undefined}
-                    className={`block pl-3 pr-4 py-2 border-l-4 text-base font-medium ${
-                      active
-                        ? "border-blue-600 bg-blue-50 text-blue-700"
-                        : "border-transparent text-gray-500 hover:bg-gray-50 hover:border-gray-300 hover:text-gray-700"
-                    }`}
+                    className={`block pl-3 pr-4 py-2 border-l-4 text-base font-medium ${active
+                      ? "border-primary bg-primary/10 text-primary"
+                      : "border-transparent text-gray-500 hover:bg-gray-50 hover:border-gray-300 hover:text-gray-700"
+                      }`}
                   >
                     {item.name}
                   </Link>
@@ -262,16 +266,16 @@ export default function Navbar() {
                 {session ? (
                   <>
                     <div className="flex-shrink-0">
-                      <div className="h-10 w-10 rounded-full bg-blue-100 flex items-center justify-center overflow-hidden">
+                      <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center overflow-hidden">
                         {session.user?.image ? (
                           <ImageWithFallback
                             className="h-10 w-10 rounded-full object-cover"
                             src={session.user.image}
                             alt="Foto de perfil"
-                            fallback="/uploads/fallback.png"
+                            fallback="/file.svg"
                           />
                         ) : (
-                          <span className="text-blue-700 font-medium">
+                          <span className="text-primary font-medium">
                             {initial}
                           </span>
                         )}
@@ -296,7 +300,7 @@ export default function Navbar() {
                     </Link>
                     <Link
                       href="/registro"
-                      className="block text-base font-medium text-blue-600 hover:text-blue-500"
+                      className="block text-base font-medium text-primary hover:text-primary/80"
                     >
                       Registrarse
                     </Link>
@@ -310,7 +314,7 @@ export default function Navbar() {
                   <span className="sr-only">Carrito</span>
                   <ShoppingCartIcon className="h-6 w-6 flex-shrink-0" aria-hidden="true" />
                   {itemCount > 0 && (
-                    <span className="absolute -top-1 -right-1 bg-blue-600 text-white text-xs font-bold rounded-full h-5 w-5 flex items-center justify-center">
+                    <span className="absolute -top-1 -right-1 bg-primary text-white text-xs font-bold rounded-full h-5 w-5 flex items-center justify-center">
                       {itemCount}
                     </span>
                   )}
@@ -334,7 +338,7 @@ export default function Navbar() {
 
                   {(role || "").toLowerCase() === "admin" && (
                     <Link
-                      href="/admin"
+                      href="/dashboard"
                       className="block px-4 py-2 text-base font-medium text-gray-500 hover:text-gray-800 hover:bg-gray-100"
                     >
                       Panel de Administración

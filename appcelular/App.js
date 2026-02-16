@@ -16,6 +16,7 @@ import QuickScanScreen from './src/screens/QuickScanScreen';
 import LoginScreen from './src/screens/LoginScreen';
 import CashManagementScreen from './src/screens/CashManagementScreen';
 import SettingsScreen from './src/screens/SettingsScreen';
+import LogViewerScreen from './src/screens/LogViewerScreen';
 import { exportCSVFile, exportJSONFile } from './src/export';
 
 import Header from './src/ui/Header';
@@ -28,6 +29,9 @@ import { syncNow, initRealtimeSync } from './src/sync';
 
 // Auth
 import AuthManager from './src/auth/AuthManager';
+
+// Logger
+import { logManager } from './src/utils/LogViewer';
 
 // Separamos la función App para garantizar el orden correcto de los hooks
 export default function App() {
@@ -52,6 +56,7 @@ export default function App() {
   const [openCashHistory, setOpenCashHistory] = useState(false);
   const [openQuickScan, setOpenQuickScan] = useState(false);
   const [openCash, setOpenCash] = useState(false);
+  const [openLogs, setOpenLogs] = useState(false);
   const [isSyncLoading, setIsSyncLoading] = useState(false);
   const [lastSyncTime, setLastSyncTime] = useState(Date.now());
   const [saleRequestedBarcode, setSaleRequestedBarcode] = useState(null);
@@ -66,13 +71,19 @@ export default function App() {
   useEffect(() => {
     const checkAuth = async () => {
       try {
+        // Cargar logs guardados
+        await logManager.loadLogs();
+        logManager.info('📱 App iniciada');
+        
         const user = await AuthManager.getCurrentUser();
         if (user) {
           setCurrentUser(user);
           setIsLoggedIn(true);
+          logManager.info(`✅ Usuario autenticado: ${user.name}`);
         }
       } catch (error) {
         console.error('Error verificando autenticación:', error);
+        logManager.error('❌ Error en autenticación', { message: error.message });
       } finally {
         setIsCheckingAuth(false);
       }
@@ -162,14 +173,21 @@ export default function App() {
     await loadProductCount();
   }, [loadProductCount, search, searchProducts]);
 
-  // Handler del TextInput
+  const searchTimeoutRef = React.useRef(null);
+
+  // Handler del TextInput con Debounce
   const handleSearchChange = useCallback((newSearch) => {
     setSearch(newSearch);
-    if (newSearch.trim().length === 0) {
-      searchProducts('');
-      return;
-    }
-    searchProducts(newSearch);
+    
+    if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
+    
+    searchTimeoutRef.current = setTimeout(() => {
+      if (newSearch.trim().length === 0) {
+        searchProducts('');
+        return;
+      }
+      searchProducts(newSearch);
+    }, 300);
   }, [searchProducts]);
 
 
@@ -299,11 +317,28 @@ export default function App() {
     }
   }, [refreshInventory]);
 
-  const handleOpenNewProductFromSale = useCallback((barcode) => {
-    setSaleRequestedBarcode(String(barcode));
-    setEditing({ barcode: String(barcode) });
-    setOpenForm(true);
-  }, []);
+  const handleOpenNewProductFromSale = useCallback(async (barcode) => {
+    const code = String(barcode).trim();
+    setSaleRequestedBarcode(code);
+    
+    // Verificar si ya existe para abrir en modo edición
+    try {
+      const existing = await listProducts(0, 1, code);
+      if (existing && existing.length > 0 && existing[0].barcode === code) {
+        // Existe, abrir en modo edición
+        onEdit(existing[0]);
+      } else {
+        // No existe, abrir en modo creación
+        setEditing({ barcode: code });
+        setOpenForm(true);
+      }
+    } catch (e) {
+      console.warn('Error verificando producto existente:', e);
+      // Fallback a modo creación
+      setEditing({ barcode: code });
+      setOpenForm(true);
+    }
+  }, [onEdit]);
 
   const consumeRecentProduct = useCallback(() => {
     setRecentlyCreatedBarcode(null);
@@ -312,6 +347,11 @@ export default function App() {
 
   // Importante: Definimos todos los hooks primero
   const renderProduct = useCallback(({ item }) => {
+    // Calcular precio venta con IVA para mostrar
+    const taxRate = Number(item.tax_rate || 19);
+    const netPrice = Number(item.sale_price || 0);
+    const grossPrice = Math.round(netPrice * (1 + taxRate / 100));
+
     return (
       <View style={[styles.card, isCompact && styles.cardCompact]}>
         {item.image_uri ? (
@@ -325,7 +365,7 @@ export default function App() {
           <Text style={styles.cardTitle}>{item.name || '(Sin nombre)'}</Text>
           <Text style={styles.cardLine}>{item.category || 'Sin categoría'}</Text>
           <Text style={styles.cardLine}>Código: {item.barcode}</Text>
-          <Text style={styles.cardLine}>Compra: ${item.purchase_price ?? 0} · Venta: ${item.sale_price ?? 0}</Text>
+          <Text style={styles.cardLine}>Compra: ${item.purchase_price ?? 0} · Venta: ${grossPrice}</Text>
           <Text style={styles.cardLine}>Vence: {item.expiry_date || '—'} · Stock: {item.stock ?? 0}</Text>
         </View>
         <View style={[styles.cardActions, isCompact && styles.cardActionsCompact]}>
@@ -414,7 +454,17 @@ export default function App() {
               value={search}
               onChangeText={handleSearchChange}
               returnKeyType="search"
-              onSubmitEditing={() => Keyboard.dismiss()}
+              onSubmitEditing={() => {
+                // Si es un código de barras (solo números y longitud > 3), intentar abrir formulario
+                if (/^\d{3,}$/.test(search)) {
+                  handleOpenNewProductFromSale(search);
+                  setSearch(''); // Limpiar búsqueda
+                } else {
+                  Keyboard.dismiss();
+                }
+              }}
+              blurOnSubmit={false}
+              autoFocus={true} // 🆕 Autofocus para capturar scanner
             />
             {search.length > 0 && (
               <TouchableOpacity onPress={() => handleSearchChange('')} style={styles.clearBtn}>
@@ -455,9 +505,19 @@ export default function App() {
             contentContainerStyle={{ paddingBottom: 120 }}
             renderItem={renderProduct}
             ListEmptyComponent={
-              <Text style={styles.emptyText}>
-                {search ? 'Sin resultados para tu búsqueda' : 'Escribe para buscar productos'}
-              </Text>
+              <View style={{ alignItems: 'center', marginTop: 24 }}>
+                <Text style={styles.emptyText}>
+                  {search ? 'Sin resultados para tu búsqueda' : 'Escribe para buscar productos'}
+                </Text>
+                {search && /^\d+$/.test(search) && (
+                  <TouchableOpacity 
+                    style={[styles.primaryBtn, { marginTop: 16, backgroundColor: '#111', paddingHorizontal: 20, paddingVertical: 12, borderRadius: 8 }]}
+                    onPress={() => handleOpenNewProductFromSale(search)}
+                  >
+                    <Text style={{ color: '#fff', fontWeight: 'bold' }}>Crear producto con código {search}</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
             }
             initialNumToRender={10}
             maxToRenderPerBatch={10}
@@ -471,6 +531,8 @@ export default function App() {
               { icon: '➕', label: 'Nuevo', onPress: onCreate },
             ]}
           />
+          
+          {/* Input oculto para capturar scanner si el foco se pierde del search (opcional, pero search con autofocus suele bastar) */}
         </View>
       )}
 
@@ -533,7 +595,19 @@ export default function App() {
         </View>
       )}
 
+      {/* 🐛 Botón debug para ver logs - solo presiona largo en el título */}
+      <TouchableOpacity 
+        style={{ position: 'absolute', top: 10, right: 10, zIndex: 999 }}
+        onLongPress={() => setOpenLogs(true)}
+      >
+        <Text style={{ fontSize: 12, color: '#999' }}>🐛</Text>
+      </TouchableOpacity>
+
       {/* Modales */}
+      <Modal visible={openLogs} animationType="slide" onRequestClose={() => setOpenLogs(false)}>
+        <LogViewerScreen onClose={() => setOpenLogs(false)} />
+      </Modal>
+
       <Modal visible={openForm} animationType="slide" onRequestClose={() => { setOpenForm(false); setSaleRequestedBarcode(null); }}>
         <SafeAreaView style={{ flex: 1, backgroundColor: '#fff' }}>
           <Header title="Producto" subtitle={editing ? 'Editar' : 'Crear nuevo'} compact />

@@ -92,6 +92,10 @@ export async function PATCH(
     if (body?.minOrderAmount !== undefined)
       payload.min_order_amount =
         body.minOrderAmount != null ? Number(body.minOrderAmount) : null;
+    if (body?.dispatchDays !== undefined)
+      payload.dispatch_days = body.dispatchDays ? String(body.dispatchDays).trim() : null;
+    if (body?.paymentType !== undefined)
+      payload.payment_type = body.paymentType ? String(body.paymentType).trim() : null;
 
     if (Object.keys(payload).length === 0) {
       return NextResponse.json(

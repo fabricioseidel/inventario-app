@@ -17,6 +17,12 @@ describe('Navbar', () => {
       </SessionProvider>
     );
   expect(screen.getByRole('navigation')).toBeInTheDocument();
-  expect(screen.getByText(/OLIVOMARKET/i)).toBeInTheDocument();
+  // Navbar may render the brand as an image (logo) or text; accept either.
+  const hasText = screen.queryByText(/OLIVOMARKET/i);
+  if (hasText) {
+    expect(hasText).toBeInTheDocument();
+  } else {
+    expect(screen.getByAltText(/OLIVOMARKET/i)).toBeInTheDocument();
+  }
   });
 });

@@ -9,12 +9,12 @@ import React, {
   useCallback,
 } from 'react';
 
-import type { ProductUI } from '@/services/products';
+import type { ProductUI } from '@/types';
 import {
   fetchAllProducts,
   searchProducts,
-  upsertProductToCloud,
-  deleteProductFromCloud,
+  saveProduct,
+  deleteProduct,
 } from '@/services/products';
 
 // Type alias for ProductUI to maintain consistency
@@ -35,6 +35,7 @@ interface ProductContextType {
   updateProduct: (id: string, productData: Partial<Product>) => Promise<void>;
   deleteProduct: (id: string) => Promise<void>;
   toggleFeatured: (id: string, value: boolean) => Promise<void>;
+  toggleActive: (id: string, value: boolean) => Promise<void>;
 }
 
 export const ProductContext = createContext<ProductContextType | undefined>(undefined);
@@ -51,23 +52,34 @@ export function ProductProvider({ children }: { children: ReactNode }) {
     }));
 
   const load = useCallback(async () => {
+    let mounted = true;
     try {
       setLoading(true);
       setError(undefined);
-  const data = await fetchAllProducts();
-  setProducts(normalize(data));
+      const data = await fetchAllProducts();
+      if (mounted) {
+        setProducts(normalize(data));
+      }
     } catch (e: any) {
-      setError(e?.message || 'Error cargando productos');
+      if (mounted) {
+        setError(e?.message || 'Error cargando productos');
+      }
     } finally {
-      setLoading(false);
+      if (mounted) {
+        setLoading(false);
+      }
     }
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   useEffect(() => {
-    load();
-  }, [load]);
-
-  const refresh = async () => {
+    const cleanup = load();
+    return () => {
+      cleanup.then((fn) => fn && fn());
+    };
+  }, [load]);  const refresh = async () => {
     await load();
   };
 
@@ -92,13 +104,13 @@ export function ProductProvider({ children }: { children: ReactNode }) {
   const trackProductView = (id: string) => {
     setProducts((prev) => prev.map(p => p.id === id ? ({ ...p, viewCount: (p.viewCount ?? 0) + 1 }) : p));
     // optional: persist to supabase (fire-and-forget)
-    // upsertProductToCloud({ barcode: id, viewCount: (getProductById(id)?.viewCount ?? 0) + 1 } as any).catch(()=>{});
+    // saveProduct({ barcode: id, viewCount: (getProductById(id)?.viewCount ?? 0) + 1 } as any).catch(()=>{});
   };
 
   const trackOrderIntent = (id: string) => {
     setProducts((prev) => prev.map(p => p.id === id ? ({ ...p, orderClicks: (p.orderClicks ?? 0) + 1 }) : p));
     // optional: persist to supabase (fire-and-forget)
-    // upsertProductToCloud({ barcode: id, orderClicks: (getProductById(id)?.orderClicks ?? 0) + 1 } as any).catch(()=>{});
+    // saveProduct({ barcode: id, orderClicks: (getProductById(id)?.orderClicks ?? 0) + 1 } as any).catch(()=>{});
   };
 
   // Crea en la nube usando "barcode" como id
@@ -107,29 +119,7 @@ export function ProductProvider({ children }: { children: ReactNode }) {
       String((productData as any).barcode ?? productData.id ?? '').trim();
     if (!barcode) throw new Error('Se requiere un código (barcode)');
 
-    await upsertProductToCloud({
-      barcode,
-      name: productData.name ?? '',
-      category: Array.isArray(productData.categories)
-        ? productData.categories.join(', ')
-        : (productData as any).category ?? null,
-      purchase_price: 0,
-      sale_price: Number(productData.price ?? 0),
-      expiry_date: null,
-      stock: Number(productData.stock ?? 0),
-    image_url: (productData as any).image ?? null,
-    gallery: (productData as any).gallery ?? null,
-    } as any);
-
-    await load();
-  };
-
-  // Actualiza en la nube por "id" (equivale a barcode)
-  const updateProduct = async (id: string, productData: Partial<Product>) => {
-    const barcode = String(id).trim();
-
-    // Update product data in Supabase (includes optional image_url/gallery)
-    await upsertProductToCloud({
+    await saveProduct({
       barcode,
       name: productData.name ?? '',
       category: Array.isArray(productData.categories)
@@ -141,13 +131,47 @@ export function ProductProvider({ children }: { children: ReactNode }) {
       stock: Number(productData.stock ?? 0),
       image_url: (productData as any).image ?? null,
       gallery: (productData as any).gallery ?? null,
+      featured: !!productData.featured,
+      is_active: (productData as any).isActive ?? (productData as any).is_active ?? false,
+      measurement_unit: (productData as any).measurementUnit ?? null,
+      measurement_value: (productData as any).measurementValue ?? null,
+      suggested_price: (productData as any).suggestedPrice ?? null,
+      offer_price: (productData as any).offerPrice ?? null,
     } as any);
 
     await load();
   };
 
-  const deleteProduct = async (id: string) => {
-    await deleteProductFromCloud(String(id));
+  // Actualiza en la nube por "id" (equivale a barcode)
+  const updateProduct = async (id: string, productData: Partial<Product>) => {
+    const barcode = String(id).trim();
+
+    // Update product data in Supabase (includes optional image_url/gallery)
+    await saveProduct({
+      barcode,
+      name: productData.name ?? '',
+      category: Array.isArray(productData.categories)
+        ? productData.categories.join(', ')
+        : (productData as any).category ?? null,
+      purchase_price: 0,
+      sale_price: Number(productData.price ?? 0),
+      expiry_date: null,
+      stock: Number(productData.stock ?? 0),
+      image_url: (productData as any).image ?? null,
+      gallery: (productData as any).gallery ?? null,
+      featured: productData.featured,
+      is_active: (productData as any).isActive ?? (productData as any).is_active ?? null,
+      measurement_unit: (productData as any).measurement_unit ?? (productData as any).measurementUnit ?? null,
+      measurement_value: (productData as any).measurement_value ?? (productData as any).measurementValue ?? null,
+      suggested_price: (productData as any).suggested_price ?? (productData as any).suggestedPrice ?? null,
+      offer_price: (productData as any).offer_price ?? (productData as any).offerPrice ?? null,
+    } as any);
+
+    await load();
+  };
+
+  const deleteProductFn = async (id: string) => {
+    await deleteProduct(String(id));
     await load();
   };
 
@@ -155,23 +179,56 @@ export function ProductProvider({ children }: { children: ReactNode }) {
     // optimistic update
     setProducts(prev => prev.map(p => p.id === id ? { ...p, featured: value } : p));
     try {
-      await upsertProductToCloud({
+      const product = getProductById(id);
+      if (!product) return;
+      
+      await saveProduct({
         barcode: id,
-        name: getProductById(id)?.name ?? null,
-        category: Array.isArray(getProductById(id)?.categories)
-          ? getProductById(id)!.categories.join(', ')
-          : (getProductById(id) as any)?.category ?? null,
+        name: product.name,
+        category: Array.isArray(product.categories)
+          ? product.categories.join(', ')
+          : (product as any).category ?? null,
         purchase_price: 0,
-        sale_price: Number(getProductById(id)?.price ?? 0),
+        sale_price: Number(product.price),
         expiry_date: null,
-        stock: Number(getProductById(id)?.stock ?? 0),
-        image_url: (getProductById(id) as any)?.image ?? null,
-        gallery: (getProductById(id) as any)?.gallery ?? null,
+        stock: Number(product.stock),
+        image_url: (product as any).image ?? null,
+        gallery: (product as any).gallery ?? null,
         featured: value,
+        is_active: product.isActive, // Preserve active state
       } as any);
     } catch (e) {
       // rollback on error
       setProducts(prev => prev.map(p => p.id === id ? { ...p, featured: !value } : p));
+      throw e;
+    }
+  };
+
+  const toggleActive = async (id: string, value: boolean) => {
+    // optimistic update
+    setProducts(prev => prev.map(p => p.id === id ? { ...p, isActive: value } : p));
+    try {
+      const product = getProductById(id);
+      if (!product) return;
+
+      await saveProduct({
+        barcode: id,
+        name: product.name,
+        category: Array.isArray(product.categories)
+          ? product.categories.join(', ')
+          : (product as any).category ?? null,
+        purchase_price: 0,
+        sale_price: Number(product.price),
+        expiry_date: null,
+        stock: Number(product.stock),
+        image_url: (product as any).image ?? null,
+        gallery: (product as any).gallery ?? null,
+        featured: product.featured, // Preserve featured state
+        is_active: value,
+      } as any);
+    } catch (e) {
+      // rollback on error
+      setProducts(prev => prev.map(p => p.id === id ? { ...p, isActive: !value } : p));
       throw e;
     }
   };
@@ -189,8 +246,9 @@ export function ProductProvider({ children }: { children: ReactNode }) {
   addProduct: createProduct,
     createProduct,
     updateProduct,
-    deleteProduct,
+    deleteProduct: deleteProductFn,
   toggleFeatured,
+  toggleActive,
   };
 
   return (

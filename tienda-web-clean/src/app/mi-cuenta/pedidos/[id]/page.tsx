@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 import { ArrowLeftIcon } from "@heroicons/react/24/outline";
+import PrintableInvoice from "@/components/PrintableInvoice";
 
 // Tipos
 type ProductoEnPedido = {
@@ -18,6 +19,7 @@ type ProductoEnPedido = {
 
 type DatosDireccion = {
   nombre: string;
+  email: string;
   calle: string;
   numero: string;
   interior?: string;
@@ -53,57 +55,83 @@ export default function DetallePedidoPage({ params }: { params: Promise<{ id: st
   // Redirigir si no está autenticado
   useEffect(() => {
     if (status === "unauthenticated") {
-  router.push(`/login?callbackUrl=/mi-cuenta/pedidos/${id}`);
+      router.push(`/login?callbackUrl=/mi-cuenta/pedidos/${id}`);
     } else if (status === "authenticated") {
-      try {
-        const raw = localStorage.getItem('orders');
-        if (!raw) { setError('No se encontró el pedido'); setIsLoading(false); return; }
-        const arr = JSON.parse(raw);
-        if (!Array.isArray(arr)) { setError('No se encontró el pedido'); setIsLoading(false); return; }
-        const found = arr.find((o: any) => o.id === id);
-        if (!found) { setError('No se encontró el pedido'); setIsLoading(false); return; }
-        const items = Array.isArray(found.items) ? found.items : [];
-        const productos: ProductoEnPedido[] = items.map((it: any, idx: number) => ({
-          id: it.id?.toString() || `ITEM-${idx}`,
-          nombre: it.name || it.nombre || `Producto ${idx+1}`,
-          precio: Number(it.price) || 0,
-          cantidad: Number(it.quantity) || 1,
-          imagenUrl: it.image || '/file.svg'
-        }));
-        const subtotal = productos.reduce((s, p) => s + p.precio * p.cantidad, 0);
-        const envio = 10; // consistente con checkout
-        const impuestos = subtotal * 0.19;
-        const direccion = found.shippingAddress || {};
-        const direccionEnvio: DatosDireccion = {
-          nombre: direccion.nombre || found.customer || '-',
-          calle: direccion.calle || '-',
-          numero: direccion.numero || '',
-          interior: direccion.interior || '',
-          colonia: direccion.colonia || '-',
-          ciudad: direccion.ciudad || '-',
-          estado: direccion.estado || '-',
-          codigoPostal: direccion.codigoPostal || '-',
-          telefono: direccion.telefono || '+00 000 0000'
-        };
-        const pedidoObj: Pedido = {
-          id: found.id,
-          fecha: (found.fecha || found.date || '').toString().split('T')[0] || '-',
-          subtotal,
-          envio,
-          impuestos,
-          total: subtotal + envio + impuestos,
-          estado: found.estado || found.status || 'En proceso',
-          productos,
-          direccionEnvio,
-          metodoPago: found.paymentMethod || 'No especificado',
-          numeroSeguimiento: undefined
-        };
-        setPedido(pedidoObj);
-      } catch (e) {
-        setError('Error cargando el pedido');
-      } finally {
-        setIsLoading(false);
-      }
+      const fetchOrder = async () => {
+        try {
+          const res = await fetch(`/api/orders/${id}`);
+          if (!res.ok) {
+            setError('No se encontró el pedido');
+            setIsLoading(false);
+            return;
+          }
+          const found = await res.json();
+          
+          const items = Array.isArray(found.order_items) ? found.order_items : (Array.isArray(found.items) ? found.items : []);
+          const productos: ProductoEnPedido[] = items.map((it: any, idx: number) => ({
+            id: it.product_id || it.id || `ITEM-${idx}`,
+            nombre: it.name || it.nombre || `Producto ${idx+1}`,
+            precio: Number(it.price) || 0,
+            cantidad: Number(it.quantity) || 1,
+            imagenUrl: it.image || '/file.svg'
+          }));
+          
+          const subtotal = Number(found.subtotal) || productos.reduce((s, p) => s + p.precio * p.cantidad, 0);
+          const envio = Number(found.shipping_cost) || 10;
+          const impuestos = subtotal * 0.19;
+          
+          const direccion = found.shipping_address || {};
+          // normalize address
+          const normalizedAddr: any = (() => {
+            if (!direccion) return {};
+            if (typeof direccion === 'string') return { formattedAddress: direccion };
+            if (direccion.formattedAddress) return direccion;
+            if (direccion.address) return { 
+                formattedAddress: direccion.address, 
+                city: direccion.city, 
+                postalCode: direccion.zipCode, 
+                country: direccion.country,
+                phone: direccion.phone,
+                email: direccion.email,
+                fullName: direccion.fullName
+            };
+            return direccion;
+          })();
+
+          const direccionEnvio: DatosDireccion = {
+            nombre: normalizedAddr.fullName || normalizedAddr.nombre || found.customer || '-',
+            email: normalizedAddr.email || found.email || found.correo || '-',
+            calle: normalizedAddr.formattedAddress ? String(normalizedAddr.formattedAddress).split(',')[0] : (normalizedAddr.calle || '-'),
+            numero: normalizedAddr.numero || '',
+            interior: normalizedAddr.interior || '',
+            colonia: normalizedAddr.colonia || '-',
+            ciudad: normalizedAddr.city || normalizedAddr.ciudad || '-',
+            estado: normalizedAddr.estado || normalizedAddr.state || '-',
+            codigoPostal: normalizedAddr.postalCode || normalizedAddr.codigoPostal || normalizedAddr.zipCode || '-',
+            telefono: normalizedAddr.phone || normalizedAddr.telefono || '+00 000 0000'
+          };
+          
+          const pedidoObj: Pedido = {
+            id: found.id,
+            fecha: (found.created_at || found.fecha || found.date || '').toString().split('T')[0] || '-',
+            subtotal,
+            envio,
+            impuestos,
+            total: Number(found.total) || (subtotal + envio + impuestos),
+            estado: found.status || found.estado || 'En proceso',
+            productos,
+            direccionEnvio,
+            metodoPago: found.payment_method || found.paymentMethod || 'No especificado',
+            numeroSeguimiento: undefined
+          };
+          setPedido(pedidoObj);
+        } catch (e) {
+          setError('Error cargando el pedido');
+        } finally {
+          setIsLoading(false);
+        }
+      };
+      fetchOrder();
     }
   }, [status, router, id]);
 
@@ -160,9 +188,40 @@ export default function DetallePedidoPage({ params }: { params: Promise<{ id: st
     );
   }
 
+  const invoiceOrder = pedido ? {
+    id: pedido.id,
+    date: pedido.fecha,
+    customer: {
+        name: pedido.direccionEnvio.nombre,
+        email: pedido.direccionEnvio.email,
+        phone: pedido.direccionEnvio.telefono
+    },
+    shipping: {
+        address: `${pedido.direccionEnvio.calle} ${pedido.direccionEnvio.numero} ${pedido.direccionEnvio.interior ? 'Int. ' + pedido.direccionEnvio.interior : ''}, ${pedido.direccionEnvio.colonia}`,
+        city: pedido.direccionEnvio.ciudad,
+        postalCode: pedido.direccionEnvio.codigoPostal,
+        country: pedido.direccionEnvio.estado
+    },
+    items: pedido.productos.map(p => ({
+        id: p.id,
+        name: p.nombre,
+        quantity: p.cantidad,
+        price: p.precio
+    })),
+    subtotal: pedido.subtotal,
+    shippingCost: pedido.envio,
+    total: pedido.total,
+    payment: {
+        method: pedido.metodoPago,
+        status: pedido.estado === 'Pendiente' ? 'pending' : 'paid'
+    }
+  } : null;
+
   return (
-    <div className="container mx-auto px-4 py-8 max-w-6xl">
-      <div className="mb-6">
+    <>
+      {invoiceOrder && <PrintableInvoice order={invoiceOrder} />}
+      <div className="container mx-auto px-4 py-8 max-w-6xl print:hidden">
+        <div className="mb-6">
         <Link href="/mi-cuenta/pedidos" className="inline-flex items-center text-blue-600 hover:text-blue-800">
           <ArrowLeftIcon className="h-4 w-4 mr-1" />
           Volver a Mis pedidos
@@ -367,6 +426,7 @@ export default function DetallePedidoPage({ params }: { params: Promise<{ id: st
           </div>
         </div>
       </div>
-    </div>
+      </div>
+    </>
   );
 }

@@ -7,8 +7,10 @@ import * as Sharing from 'expo-sharing';
 import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
 import { getSaleWithItems, listSalesBetween, exportSalesCSV, voidSale, updateSaleTransferReceipt } from '../db';
+import { syncNow } from '../sync';
 import { theme } from '../ui/Theme';
 import { copyFileToDocuments, getFileDisplayName } from '../utils/media';
+import { uploadReceiptToSupabase } from '../utils/supabaseStorage';
 
 const PMETHODS = ['efectivo', 'debito', 'credito', 'transferencia'];
 function startOfDay(d) { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; }
@@ -106,26 +108,113 @@ export default function SalesHistoryScreen({ onClose, refreshKey }) {
   };
 
   const persistProof = async (localUri, displayName) => {
-    if (!detail?.sale?.id || !localUri) return;
+    const startTime = Date.now();
+    if (!detail?.sale?.id || !localUri) {
+      console.warn('⚠️ persistProof: Falta sale.id o localUri');
+      return;
+    }
+    
     setAttachLoading(true);
     try {
-      const saved = await copyFileToDocuments(localUri, {
-        folder: 'receipts',
-        prefix: `sale-${detail.sale.id}`,
-      });
-      const named = displayName || getFileDisplayName(localUri) || null;
-      await updateSaleTransferReceipt(detail.sale.id, saved, named);
+      console.log('═══════════════════════════════════════════════════════');
+      console.log('📎 [ADJUNTAR COMPROBANTE] Procesando archivo');
+      console.log('═══════════════════════════════════════════════════════');
+      console.log(`⏰ Timestamp: ${new Date().toISOString()}`);
+      console.log(`🆔 Sale ID: ${detail.sale.id}`);
+      console.log(`📁 URI: ${localUri.substring(0, 80)}...`);
+      console.log(`📝 Nombre: ${displayName}`);
+      
+      // Subir a Supabase Storage en lugar de guardar localmente
+      let uploadedUrl = null;
+      let uploadedName = null;
+      let isLocalFile = false;
+
+      // Si es una imagen, subirla a Supabase
+      if (localUri.startsWith('file://') || localUri.includes('Documents')) {
+        isLocalFile = true;
+        console.log('⏳ [PASO 1] Detectado archivo local - procediendo con upload');
+        
+        try {
+          uploadedUrl = await uploadReceiptToSupabase(localUri, detail.sale.id);
+          
+          console.log(`⏳ [DEBUG] Valor retornado de uploadReceiptToSupabase:`);
+          console.log(`   Type: ${typeof uploadedUrl}`);
+          console.log(`   Value: ${uploadedUrl}`);
+          console.log(`   Length: ${uploadedUrl ? uploadedUrl.length : 'null'}`);
+          
+          if (!uploadedUrl) {
+            throw new Error('uploadReceiptToSupabase retornó null o undefined');
+          }
+          
+          uploadedName = displayName || getFileDisplayName(localUri) || null;
+          console.log(`✅ [PASO 2] Archivo subido a Supabase`);
+          console.log(`   URL: ${uploadedUrl}`);
+        } catch (uploadError) {
+          console.error('❌ [ERROR EN UPLOAD]');
+          console.error(`   Message: ${uploadError.message}`);
+          console.error(`   Stack: ${uploadError.stack}`);
+          console.error(`   Sale ID: ${detail.sale.id}`);
+          console.error(`   Local URI: ${localUri.substring(0, 80)}`);
+          
+          // 🆕 OFFLINE SUPPORT: Si falla la subida, guardamos localmente
+          console.log('⚠️ [OFFLINE SUPPORT] Falló subida, guardando URI local para sincronización posterior');
+          uploadedUrl = localUri;
+          uploadedName = displayName || getFileDisplayName(localUri) || null;
+        }
+      } else {
+        // Si ya es una URL (de otro dispositivo), usarla directamente
+        isLocalFile = false;
+        console.log('✅ [PASO 1] Detectada URL remota - usando directamente');
+        uploadedUrl = localUri;
+        uploadedName = displayName || null;
+        console.log(`   URL: ${uploadedUrl.substring(0, 60)}...`);
+      }
+
+      // Actualizar la venta en BD local
+      console.log('⏳ [PASO 3] Actualizando venta en base de datos local...');
+      await updateSaleTransferReceipt(detail.sale.id, uploadedUrl, uploadedName);
+      console.log(`✅ BD local actualizada`);
+
+      console.log('⏳ [PASO 4] Recargando detalle de venta...');
       const updated = await getSaleWithItems(detail.sale.id);
       setDetail(updated);
       setSales(prev =>
         prev.map(s =>
-          s.id === detail.sale.id ? { ...s, transfer_receipt_uri: saved, transfer_receipt_name: named } : s
+          s.id === detail.sale.id ? { ...s, transfer_receipt_uri: uploadedUrl, transfer_receipt_name: uploadedName } : s
         )
       );
-      Alert.alert('Comprobante', 'Archivo guardado correctamente.');
+      console.log(`✅ Venta actualizada en lista`);
+
+      const totalTime = Date.now() - startTime;
+      console.log('═══════════════════════════════════════════════════════');
+      console.log(`✅ [ÉXITO] Comprobante procesado en ${totalTime}ms`);
+      console.log('═══════════════════════════════════════════════════════');
+      console.log(`Tipo: ${isLocalFile ? 'Archivo nuevo' : 'URL remota'}`);
+      console.log(`URL Final: ${uploadedUrl.substring(0, 60)}...`);
+      
+      // Sincronizar automáticamente después de agregar comprobante
+      console.log('⏳ [PASO 5] Sincronizando venta con Supabase...');
+      try {
+        await syncNow();
+        console.log('✅ Sincronización completada');
+      } catch (syncError) {
+        console.warn('⚠️ Error en sincronización automática:', syncError.message);
+        // No lanzamos error, la sincronización fallida no debería detener el flujo
+      }
+      
+      Alert.alert('Comprobante', 'Archivo guardado y sincronizado correctamente.');
     } catch (error) {
-      console.error('persistProof error', error);
-      Alert.alert('Error', 'No se pudo guardar el comprobante.');
+      const totalTime = Date.now() - startTime;
+      console.error('═══════════════════════════════════════════════════════');
+      console.error(`❌ [ERROR] Falló al procesar comprobante (${totalTime}ms)`);
+      console.error('═══════════════════════════════════════════════════════');
+      console.error(`Error Type: ${error.name}`);
+      console.error(`Error Message: ${error.message}`);
+      console.error(`Stack: ${error.stack}`);
+      console.error(`Sale ID: ${detail?.sale?.id}`);
+      console.error(`URI: ${localUri?.substring(0, 60)}...`);
+      
+      Alert.alert('Error', `No se pudo guardar el comprobante: ${error.message}`);
     } finally {
       setAttachLoading(false);
     }

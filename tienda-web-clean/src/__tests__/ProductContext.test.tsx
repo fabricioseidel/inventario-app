@@ -1,10 +1,10 @@
 import React from 'react';
-import { render } from '@testing-library/react';
+import { render, waitFor } from '@testing-library/react';
 import { describe, it, expect } from 'vitest';
 import { useProducts, ProductContext, ProductProvider } from '../contexts/ProductContext';
 
 describe('ProductContext', () => {
-  it('provides default values', () => {
+  it('provides default values', async () => {
     let value: ReturnType<typeof useProducts> | undefined;
     function TestComponent() {
       value = useProducts();
@@ -15,7 +15,12 @@ describe('ProductContext', () => {
         <TestComponent />
       </ProductProvider>
     );
-    expect(value).toBeDefined();
-  expect(value?.products).toBeDefined();
+    
+    await waitFor(() => {
+      expect(value).toBeDefined();
+      expect(value?.loading).toBe(false);
+    });
+    
+    expect(value?.products).toBeDefined();
   });
 });

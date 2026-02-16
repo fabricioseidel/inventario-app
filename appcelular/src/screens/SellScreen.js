@@ -19,8 +19,10 @@ import * as DocumentPicker from 'expo-document-picker';
 
 import ScannerScreen from './ScannerScreen';
 import { getProductByBarcode, recordSale } from '../db';
+import { syncNow } from '../sync';
 import { theme } from '../ui/Theme';
 import { copyFileToDocuments, getFileDisplayName } from '../utils/media';
+import { uploadReceiptToSupabase } from '../utils/supabaseStorage';
 
 const PMETHODS = ['efectivo', 'debito', 'credito', 'transferencia'];
 
@@ -60,7 +62,7 @@ export default function SellScreen({
         next[i] = {
           ...next[i],
           qty: Number(next[i].qty || 0) + 1,
-          unit_price: p.sale_price ?? next[i].unit_price,
+          unit_price: (p.sale_price != null) ? Number(p.sale_price) : next[i].unit_price,
         };
         return next;
       }
@@ -278,13 +280,90 @@ export default function SellScreen({
     }
     const proof = method === 'transferencia' ? transferProof : null;
     try {
+      let receiptUrl = null;
+      let receiptName = null;
+
+      // Si hay comprobante de imagen, subirlo a Supabase Storage
+      if (proof && proof.kind === 'image') {
+        try {
+          console.log('═══════════════════════════════════════════════════════');
+          console.log('📤 [VENTA] Iniciando proceso de pago con comprobante');
+          console.log('═══════════════════════════════════════════════════════');
+          console.log(`Método de pago: TRANSFERENCIA`);
+          console.log(`Total venta: $${total.toFixed(0)}`);
+          console.log(`Comprobante detectado: Sí`);
+          console.log(`Tipo: ${proof.kind}`);
+          console.log(`Nombre: ${proof.name}`);
+
+          // Generar un ID temporal para el nombre del archivo
+          const tempSaleId = `temp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+          console.log(`⏳ [PASO 1] Subiendo comprobante a Supabase...`);
+          console.log(`   ID temporal: ${tempSaleId}`);
+
+          receiptUrl = await uploadReceiptToSupabase(proof.uri, tempSaleId);
+
+          console.log(`⏳ [DEBUG] Valor retornado de uploadReceiptToSupabase:`);
+          console.log(`   Type: ${typeof receiptUrl}`);
+          console.log(`   Value: ${receiptUrl}`);
+          console.log(`   Length: ${receiptUrl ? receiptUrl.length : 'null'}`);
+
+          receiptName = proof.name;
+
+          if (!receiptUrl) {
+            console.warn(`⚠️ [ADVERTENCIA] uploadReceiptToSupabase retornó un valor vacío`);
+            throw new Error('uploadReceiptToSupabase retornó null o undefined');
+          }
+
+          console.log(`✅ [PASO 2] Comprobante subido exitosamente`);
+          console.log(`   URL: ${receiptUrl}`);
+          console.log(`═══════════════════════════════════════════════════════`);
+        } catch (uploadError) {
+          console.error('═══════════════════════════════════════════════════════');
+          console.error(`❌ [ERROR] Fallo al subir comprobante`);
+          console.error('═══════════════════════════════════════════════════════');
+          console.error(`Error: ${uploadError.message}`);
+          console.error(`Stack: ${uploadError.stack}`);
+          console.error(`Sale ID temporal: temp-${Date.now()}`);
+
+          // 🆕 OFFLINE SUPPORT: Si falla la subida (ej. sin internet), guardamos la URI local
+          // El proceso de sync (pushSales) se encargará de subirla cuando haya conexión
+          console.log('⚠️ [OFFLINE SUPPORT] Falló subida, guardando URI local para sincronización posterior');
+          receiptUrl = proof.uri;
+          receiptName = proof.name;
+
+          // Alert.alert('Aviso', 'No hay conexión para subir el comprobante. Se guardará localmente y se subirá cuando recuperes la conexión.');
+        }
+      }
+
+      console.log('⏳ [PASO 3] Registrando venta en base de datos local...');
       const payload = {
         paymentMethod: method,
         amountPaid: Number(amountPaid || 0),
-        transferReceiptUri: proof?.uri || null,
-        transferReceiptName: proof?.name || null,
+        transferReceiptUri: receiptUrl,
+        transferReceiptName: receiptName,
       };
+      console.log(`Payload:`, {
+        method,
+        amountPaid: payload.amountPaid,
+        hasReceipt: !!receiptUrl,
+        receiptUrl: receiptUrl ? '✅ Presente' : '❌ Ausente',
+      });
+
       await recordSale(cart, payload);
+      console.log(`✅ Venta registrada en local correctamente`);
+
+      // Sincronizar automáticamente si hay comprobante o se especifique
+      if (receiptUrl) {
+        console.log('⏳ [PASO 4] Sincronizando venta con comprobante a Supabase...');
+        try {
+          await syncNow();
+          console.log('✅ Sincronización completada');
+        } catch (syncError) {
+          console.warn('⚠️ Error en sincronización automática:', syncError.message);
+          // No lanzamos error, la sincronización fallida no debería detener el flujo
+        }
+      }
+
       Alert.alert(
         'Venta registrada',
         `Total: $${total.toFixed(0)}${method === 'efectivo' ? `\nVuelto: $${change.toFixed(0)}` : ''}`
@@ -292,8 +371,15 @@ export default function SellScreen({
       clear();
       onSold && onSold();
     } catch (e) {
-      console.warn('pay error', e);
-      Alert.alert('Error', 'No se pudo registrar la venta.');
+      console.error('═══════════════════════════════════════════════════════');
+      console.error('❌ [ERROR CRÍTICO] Error al procesar el pago');
+      console.error('═══════════════════════════════════════════════════════');
+      console.error(`Error Type: ${e.name}`);
+      console.error(`Error Message: ${e.message}`);
+      console.error(`Stack: ${e.stack}`);
+      console.error(`Monto: $${total.toFixed(0)}`);
+      console.error(`Método: ${method}`);
+      Alert.alert('Error', `No se pudo registrar la venta: ${e.message}`);
     }
   }, [amountPaid, canPay, cart, change, clear, method, onSold, total, transferProof]);
 
@@ -332,12 +418,14 @@ export default function SellScreen({
           </TouchableOpacity>
           <TextInput
             style={[styles.input, { flex: 1 }]}
-            placeholder="Código manual…"
+            placeholder="Código manual (o escanear)…"
             value={barcodeManual}
             onChangeText={setBarcodeManual}
             onSubmitEditing={addManual}
             keyboardType="numeric"
             returnKeyType="done"
+            blurOnSubmit={false} // Mantiene el foco para escaneo continuo
+            autoFocus={true} // Foco inicial para escanear directo
           />
           <TouchableOpacity style={[styles.ghostBtn, styles.ghostBtnCompact]} onPress={addManual}>
             <Text style={styles.ghostBtnText}>Agregar</Text>

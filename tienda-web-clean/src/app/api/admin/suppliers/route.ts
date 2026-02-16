@@ -89,6 +89,8 @@ export async function POST(req: Request) {
         typeof body?.leadTimeDays === "number" ? body.leadTimeDays : null,
       min_order_amount:
         body?.minOrderAmount != null ? Number(body.minOrderAmount) : null,
+      dispatch_days: body?.dispatchDays ? String(body.dispatchDays).trim() : null,
+      payment_type: body?.paymentType ? String(body.paymentType).trim() : null,
     };
 
     if (!payload.name) {

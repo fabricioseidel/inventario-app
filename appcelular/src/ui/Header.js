@@ -14,7 +14,7 @@ export default function Header({ title, subtitle, compact, currentUser, onLogout
       {currentUser && onLogout && (
         <View style={styles.rightSection}>
           <Text style={styles.userText}>{currentUser.name}</Text>
-          <TouchableOpacity onPress={onLogout} style={styles.logoutButton}>
+          <TouchableOpacity onPress={onLogout} style={styles.logoutButton} focusable={false}>
             <Text style={styles.logoutText}>Salir</Text>
           </TouchableOpacity>
         </View>
