@@ -1,0 +1,7 @@
+feat: Añade función de copia de seguridad y restauración de la base de datos
+
+Se ha añadido una nueva pantalla de 'Ajustes' que permite a los usuarios crear una copia de seguridad de la base de datos local (olivomarket.db) y restaurarla desde un archivo. Esto proporciona una capa de seguridad de datos y portabilidad.
+
+fix: Corrige el error de compilación de Gradle
+
+Se actualizaron las versiones del Android Gradle Plugin y la distribución de Gradle para resolver la incompatibilidad que causaba el error 'Could not create service of type FileHasher'. La aplicación ahora compila y se ejecuta correctamente.

@@ -1,0 +1,47 @@
+0000000000000000000000000000000000000000 203d2d58556bdbd9a0910ed9e7b0af8f65b67d39 FabricioSeidel <seidelfabriciove@gmail.com> 1755551730 -0400	commit (initial): Initial commit
+203d2d58556bdbd9a0910ed9e7b0af8f65b67d39 4f71e65e52b8f0c0265f56df8d8cbfaec9166601 FabricioSeidel <seidelfabriciove@gmail.com> 1755551892 -0400	commit: chore: prepare EAS preview build
+4f71e65e52b8f0c0265f56df8d8cbfaec9166601 5812d39a0685e6d86565922580ff9eed69129d4e FabricioSeidel <seidelfabriciove@gmail.com> 1755556978 -0400	commit: feat: pre-request camera permission to avoid camera crash
+5812d39a0685e6d86565922580ff9eed69129d4e 565114a16de314819536be6e54094eafe6c36369 FabricioSeidel <seidelfabriciove@gmail.com> 1755557383 -0400	commit: fix(scanner): add mount error handling and pre-permission flow
+565114a16de314819536be6e54094eafe6c36369 3a433fade106e440fd435f598dafbfba7223f85b FabricioSeidel <seidelfabriciove@gmail.com> 1755557963 -0400	commit: fix(scanner): guard camera permission APIs and hook fallback
+3a433fade106e440fd435f598dafbfba7223f85b b60077012f0e873f279bdf2ba5cb63456db45c7d FabricioSeidel <seidelfabriciove@gmail.com> 1755558753 -0400	commit: fix: repair ProductForm JSX and add barcode-scanner fallback
+b60077012f0e873f279bdf2ba5cb63456db45c7d ecc8a083c7a81292a026492edd6590cac45fdabe FabricioSeidel <seidelfabriciove@gmail.com> 1755558844 -0400	commit: feat(scanner): timeout fallback button and improved alt mode
+ecc8a083c7a81292a026492edd6590cac45fdabe 4c0672a9e07326531897c0525ae8d3aad700859d FabricioSeidel <seidelfabriciove@gmail.com> 1755559515 -0400	commit: refactor(scanner): remove expo-camera and use only expo-barcode-scanner
+4c0672a9e07326531897c0525ae8d3aad700859d 01e096c1e569c9f3be5f9d1f8009441baf993d79 FabricioSeidel <seidelfabriciove@gmail.com> 1755562313 -0400	commit: feat: error logger, category creation fix, updates disabled
+01e096c1e569c9f3be5f9d1f8009441baf993d79 e00010f4f6d5941209e438854b7616b7215acb81 FabricioSeidel <seidelfabriciove@gmail.com> 1755564886 -0400	commit: chore: clean repo, remove legacy files and add async-storage
+e00010f4f6d5941209e438854b7616b7215acb81 ded524e0b16bd199515879b11a5d7d1faf9f276a FabricioSeidel <seidelfabriciove@gmail.com> 1755698741 -0400	commit: chore: stub legacy sync and supabase files to fix EAS bundling
+ded524e0b16bd199515879b11a5d7d1faf9f276a f391c712870784af2ad9fd5e2709965973a550b1 FabricioSeidel <seidelfabriciove@gmail.com> 1755704231 -0400	commit: feat: add GitHub Actions workflow for APK build
+f391c712870784af2ad9fd5e2709965973a550b1 d4a72106b0410df4fa41ee1754a2cfc4f1a2c1d0 FabricioSeidel <seidelfabriciove@gmail.com> 1755704540 -0400	commit: fix: update GitHub Actions to use v4 artifacts and latest action versions
+d4a72106b0410df4fa41ee1754a2cfc4f1a2c1d0 0494e20f8ead38a504a0115469dfb63cc1241b70 FabricioSeidel <seidelfabriciove@gmail.com> 1755704648 -0400	commit: fix: use JDK 17 for Android SDK compatibility and skip version check
+0494e20f8ead38a504a0115469dfb63cc1241b70 ac087fda4123cc126b85205c8276b09de7650892 FabricioSeidel <seidelfabriciove@gmail.com> 1755705530 -0400	commit: fix: update package name and version code to avoid installation conflicts
+ac087fda4123cc126b85205c8276b09de7650892 7b9a39ba481f567449e68957a14086a5595b486a FabricioSeidel <seidelfabriciove@gmail.com> 1755825386 -0400	pull origin master: Fast-forward
+7b9a39ba481f567449e68957a14086a5595b486a 7e3c460368c741681e7696a06fe8b012348fd9dd FabricioSeidel <seidelfabriciove@gmail.com> 1755825513 -0400	commit: npm install
+7e3c460368c741681e7696a06fe8b012348fd9dd 01fddbe4eb5be4058e01ad475591485c36f90070 FabricioSeidel <seidelfabriciove@gmail.com> 1756223914 -0400	pull origin master: Fast-forward
+01fddbe4eb5be4058e01ad475591485c36f90070 fc26dbf490ba0b859097553789d3ceaac353c520 FabricioSeidel <seidelfabriciove@gmail.com> 1756224877 -0400	commit: carpeta ui creada
+fc26dbf490ba0b859097553789d3ceaac353c520 3cb792d687deaa02c04159008488d422e3d16c92 FabricioSeidel <seidelfabriciove@gmail.com> 1756228439 -0400	commit: subiendo supabase
+3cb792d687deaa02c04159008488d422e3d16c92 6b8e070f8346c1eaa87143255186696e0172f96b FabricioSeidel <seidelfabriciove@gmail.com> 1756230102 -0400	commit: sinc de productos
+6b8e070f8346c1eaa87143255186696e0172f96b e0047142faa895a29d23d27bac0d2fa44be333b4 FabricioSeidel <seidelfabriciove@gmail.com> 1757535028 -0300	pull origin master --no-edit: Fast-forward
+e0047142faa895a29d23d27bac0d2fa44be333b4 b4aa703ab3343326a97177b903de550af0aa7725 FabricioSeidel <seidelfabriciove@gmail.com> 1757541871 -0300	commit: arreglando sincronizacion de dispositivos
+b4aa703ab3343326a97177b903de550af0aa7725 a7a209323ec1dcf4e3afd7139ad550efef1bc13b FabricioSeidel <seidelfabriciove@gmail.com> 1757544464 -0300	commit: arreglando timestap retrasado a milisegundos para evitar fallas de conprension
+a7a209323ec1dcf4e3afd7139ad550efef1bc13b a11feb2735e4e315ae973243d31a2f46832ab80e FabricioSeidel <seidelfabriciove@gmail.com> 1758564161 -0300	pull origin master: Fast-forward
+a11feb2735e4e315ae973243d31a2f46832ab80e d8072c0451ddc8267997a0bd070173523d61b884 FabricioSeidel <seidelfabriciove@gmail.com> 1758564749 -0300	commit: fix: mejorar inicialización de base de datos y migraciones secuenciales
+d8072c0451ddc8267997a0bd070173523d61b884 0dca05b4b4f45baa2bb95779d99fb4d5ca281c69 FabricioSeidel <seidelfabriciove@gmail.com> 1758803439 -0300	pull origin master: Fast-forward
+0dca05b4b4f45baa2bb95779d99fb4d5ca281c69 6e6db45a4bbfe6ebe1b0eada1420c3da48d904e3 FabricioSeidel <seidelfabriciove@gmail.com> 1758804829 -0300	commit: Fix: Correcciones en el orden de los hooks para evitar errores de renderizado
+6e6db45a4bbfe6ebe1b0eada1420c3da48d904e3 275f6419b29889f6c3adb63a637def19edd4bf77 FabricioSeidel <seidelfabriciove@gmail.com> 1758807820 -0300	commit: Pruebas completas: Aplicación funcional y lista para producción
+275f6419b29889f6c3adb63a637def19edd4bf77 d7167449c6d1af9614229b948cce17a0cca931bb FabricioSeidel <seidelfabriciove@gmail.com> 1758841561 -0300	commit: feat: Implementar sistema completo de manejo de caja con historial
+d7167449c6d1af9614229b948cce17a0cca931bb f2b17c816e066abb916ef9094931bce7acfcd27e Fabricio seidel <seidelfabriciove@gmail.com> 1760624778 -0300	commit: Add runtimeVersion to fix manifest issues in dev builds
+f2b17c816e066abb916ef9094931bce7acfcd27e 1de08cad65a169c1014b7c94c765b4ff59216189 Fabricio seidel <seidelfabriciove@gmail.com> 1760626155 -0300	commit: Fix search functionality and prevent duplicate barcodes on create
+1de08cad65a169c1014b7c94c765b4ff59216189 7d60ac43a271715777032a6a363b4c64e7658540 Fabricio seidel <seidelfabriciove@gmail.com> 1760627238 -0300	commit: Fix inventory loading: show products when no search
+7d60ac43a271715777032a6a363b4c64e7658540 4f169bdf8e7e65bc1d9eb7e24377863863e623c7 Fabricio seidel <seidelfabriciove@gmail.com> 1760986616 -0300	commit: Refactor auth and transfer flow
+4f169bdf8e7e65bc1d9eb7e24377863863e623c7 3680cc84703c885f7e882072839762bd096d18b8 Fabricio seidel <seidelfabriciove@gmail.com> 1760986988 -0300	commit: Actualizaciones finales: mejoras en pantallas de efectivo, header y tema, limpieza de archivos temporales
+3680cc84703c885f7e882072839762bd096d18b8 02c4bdfd00f185922bb6c0929a89d6a6f06c9ea0 Fabricio seidel <seidelfabriciove@gmail.com> 1760988854 -0300	commit: Configure release build workflow
+02c4bdfd00f185922bb6c0929a89d6a6f06c9ea0 de95531baf569c3a2be7a25008e0579f8887956e Fabricio seidel <seidelfabriciove@gmail.com> 1760992341 -0300	commit: arreglando carga de archivos para trnasferencia
+de95531baf569c3a2be7a25008e0579f8887956e 37411d5011399d1804e895518a7936be1c958b67 Fabricio seidel <seidelfabriciove@gmail.com> 1760994230 -0300	commit: fix 2 archivo trnasferencia
+37411d5011399d1804e895518a7936be1c958b67 c52b7c2c30a8081d2645a6f387d2a3b370158874 Fabricio seidel <seidelfabriciove@gmail.com> 1760996489 -0300	commit: Restore dev-client setup
+c52b7c2c30a8081d2645a6f387d2a3b370158874 d3ca897e28e928f13dab096548ad1e02a5aaf7e1 Fabricio seidel <seidelfabriciove@gmail.com> 1761866463 -0300	commit: sincronizacion wev
+d3ca897e28e928f13dab096548ad1e02a5aaf7e1 f0fb405ed312eafaf87a34f0aeb5476598554390 Fabricio seidel <seidelfabriciove@gmail.com> 1761868131 -0300	commit: Actualizar Gradle a 8.5 para compatibilidad con Kotlin 2.1.20
+f0fb405ed312eafaf87a34f0aeb5476598554390 fcc9173dffb9a63acbd0f1bcd0ff33ff78c8ce93 Fabricio seidel <seidelfabriciove@gmail.com> 1761868389 -0300	commit: Hacer gradlew ejecutable
+fcc9173dffb9a63acbd0f1bcd0ff33ff78c8ce93 1fd035a998f5a5c7f7646d624d21bfc13739f479 Fabricio seidel <seidelfabriciove@gmail.com> 1761869980 -0300	commit: fix: Actualizar AGP 8.1.4 y Kotlin 1.9.20 para Gradle 8.5
+1fd035a998f5a5c7f7646d624d21bfc13739f479 1fd035a998f5a5c7f7646d624d21bfc13739f479 Fabricio seidel <seidelfabriciove@gmail.com> 1762787218 -0300	reset: moving to HEAD
+1fd035a998f5a5c7f7646d624d21bfc13739f479 1fd035a998f5a5c7f7646d624d21bfc13739f479 Fabricio seidel <seidelfabriciove@gmail.com> 1762787421 -0300	reset: moving to HEAD
+1fd035a998f5a5c7f7646d624d21bfc13739f479 7b19edca8a5adad7d3772ee67e43f5b8bfb481a8 Fabricio seidel <seidelfabriciove@gmail.com> 1762795060 -0300	commit: feat: Añade función de copia de seguridad y restauración de la base de datos
+7b19edca8a5adad7d3772ee67e43f5b8bfb481a8 7b19edca8a5adad7d3772ee67e43f5b8bfb481a8 Fabricio seidel <seidelfabriciove@gmail.com> 1763478693 -0300	checkout: moving from master to master

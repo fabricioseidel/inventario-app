@@ -1,6 +1,7 @@
 # Global ignores for monorepo
 **/node_modules/
 **/.expo/
+**/.expo-shared/
 **/.next/
 **/dist/
 **/build/
@@ -15,3 +16,7 @@ thumbs.db
 
 **/.git_backup/
 
+android/build/
+android/.gradle/
+android/app/build/
+ios/
