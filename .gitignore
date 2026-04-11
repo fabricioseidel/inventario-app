@@ -20,3 +20,6 @@ android/build/
 android/.gradle/
 android/app/build/
 ios/
+
+# Archivo de credenciales local (NO subir)
+CREDENCIALES_Y_SETUP.md
